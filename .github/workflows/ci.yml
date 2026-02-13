@@ -20,14 +20,10 @@ jobs:
 
       - name: Install dependencies
         run: |
-          which python
-          python --version
-          python -m ensurepip --upgrade
           python -m pip install --upgrade pip
-          python -m pip install pytest pytest-cov
           python -m pip install -r requirements.txt
+
 
       - name: Run tests
         run: |
           python -m pytest --cov=src --cov=web --cov-report=term
-          

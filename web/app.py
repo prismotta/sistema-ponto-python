@@ -1,40 +1,45 @@
 from flask import Flask, render_template, request, redirect, session
 import sqlite3
-from datetime import datetime
-from werkzeug.security import generate_password_hash, check_password_hash
+import os
 from datetime import datetime, timedelta
+from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
 app.secret_key = "segredo_super_seguro"
 
+
+# =========================
+# BANCO
+# =========================
+
 def conectar():
     return sqlite3.connect("web/database.db")
+
 
 def criar_banco():
     conn = conectar()
     cursor = conn.cursor()
 
     cursor.execute("""
-    CREATE TABLE IF NOT EXISTS usuarios (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        username TEXT UNIQUE,
-        password TEXT
-    )
+        CREATE TABLE IF NOT EXISTS usuarios (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE,
+            password TEXT
+        )
     """)
 
     cursor.execute("""
-CREATE TABLE IF NOT EXISTS registros (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER,
-    data TEXT,
-    entrada_manha TEXT,
-    saida_almoco TEXT,
-    volta_almoco TEXT,
-    saida_final TEXT,
-    FOREIGN KEY(user_id) REFERENCES usuarios(id)
-)
-""")
-
+        CREATE TABLE IF NOT EXISTS registros (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            data TEXT,
+            entrada_manha TEXT,
+            saida_almoco TEXT,
+            volta_almoco TEXT,
+            saida_final TEXT,
+            FOREIGN KEY(user_id) REFERENCES usuarios(id)
+        )
+    """)
 
     conn.commit()
     conn.close()
@@ -43,6 +48,7 @@ CREATE TABLE IF NOT EXISTS registros (
 # =========================
 # LOGIN
 # =========================
+
 @app.route("/", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
@@ -54,7 +60,6 @@ def login():
 
         cursor.execute("SELECT * FROM usuarios WHERE username=?", (username,))
         user = cursor.fetchone()
-
         conn.close()
 
         if user and check_password_hash(user[2], password):
@@ -65,9 +70,11 @@ def login():
 
     return render_template("login.html")
 
+
 # =========================
 # REGISTER
 # =========================
+
 @app.route("/register", methods=["GET", "POST"])
 def register():
     if request.method == "POST":
@@ -151,12 +158,15 @@ def dashboard():
             "total": total_linha
         })
 
-    return render_template("dashboard.html",
-                           registros=registros,
-                           total=total_geral)
+    return render_template(
+        "dashboard.html",
+        registros=registros,
+        total=total_geral
+    )
+
 
 # =========================
-# BATER
+# BATER PONTO
 # =========================
 
 @app.route("/bater")
@@ -179,37 +189,29 @@ def bater():
     registro = cursor.fetchone()
 
     if not registro:
-        # Primeira batida do dia
         cursor.execute("""
             INSERT INTO registros (user_id, data, entrada_manha)
             VALUES (?, ?, ?)
         """, (session["user_id"], hoje, hora_atual))
-
     else:
         id_registro = registro[0]
 
-        entrada_manha = registro[3]
-        saida_almoco = registro[4]
-        volta_almoco = registro[5]
-        saida_final = registro[6]
-
-        if not saida_almoco:
+        if not registro[4]:
             cursor.execute(
                 "UPDATE registros SET saida_almoco=? WHERE id=?",
                 (hora_atual, id_registro)
             )
-        elif not volta_almoco:
+        elif not registro[5]:
             cursor.execute(
                 "UPDATE registros SET volta_almoco=? WHERE id=?",
                 (hora_atual, id_registro)
             )
-        elif not saida_final:
+        elif not registro[6]:
             cursor.execute(
                 "UPDATE registros SET saida_final=? WHERE id=?",
                 (hora_atual, id_registro)
             )
         else:
-            # Já completou o dia → cria novo registro
             cursor.execute("""
                 INSERT INTO registros (user_id, data, entrada_manha)
                 VALUES (?, ?, ?)
@@ -219,6 +221,7 @@ def bater():
     conn.close()
 
     return redirect("/dashboard")
+
 
 # =========================
 # LOGOUT
@@ -231,9 +234,11 @@ def logout():
 
 
 # =========================
-# START APP
+# START APP (PRODUÇÃO)
 # =========================
 
 if __name__ == "__main__":
     criar_banco()
-    app.run(debug=True)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
+    

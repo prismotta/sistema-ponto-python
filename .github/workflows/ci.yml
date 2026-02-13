@@ -13,15 +13,21 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
-      - uses: actions/setup-python@v4
+      - name: Setup Python
+        uses: actions/setup-python@v4
         with:
-          python-version: '3.11'
+          python-version: "3.11"
 
-      - name: Instalar dependências
+      - name: Install dependencies
         run: |
+          which python
+          python --version
+          python -m ensurepip --upgrade
           python -m pip install --upgrade pip
+          python -m pip install pytest pytest-cov
           python -m pip install -r requirements.txt
 
-      - name: Rodar testes
+      - name: Run tests
         run: |
           python -m pytest --cov=src --cov=web --cov-report=term
+          

@@ -1,113 +1,171 @@
-# Sistema de Bater Ponto em Python
+# Sistema de Ponto - Projeto QA
 
-Projeto simples de registro de ponto desenvolvido em Python.
-Ideal para fins educacionais e portfólio.
+Sistema completo de controle de ponto desenvolvido em Python com foco em qualidade, testabilidade e boas práticas de arquitetura.
+
+O projeto evoluiu de uma versão CLI para interface gráfica e, posteriormente, para uma aplicação web com autenticação, banco de dados e testes automatizados com alta cobertura.
 
 ---
 
 ## Funcionalidades
 
-- Registro de entrada
-- Registro de saída
+### Autenticação
+- Cadastro de usuário
+- Login com hash seguro de senha (Werkzeug)
+- Controle de sessão
+- Logout
+- Rotas protegidas
+
+### Registro de Ponto
+- Entrada
+- Saída para almoço
+- Volta do almoço
+- Saída final
 - Cálculo automático de horas trabalhadas
-- Armazenamento em arquivo CSV
-- Estrutura organizada em módulos (boa prática de projeto)
+
+### Histórico
+- Histórico por usuário
+- Total trabalhado por dia
+- Total acumulado
+
+### Testes Automatizados
+- Testes unitários
+- Testes de integração
+- Testes de fluxo HTTP
+- Testes de regras de negócio
+- Cobertura de código: 94%
 
 ---
 
-## Tecnologias Utilizadas
-
-- Python 3
-- Biblioteca padrão `csv`
-- Estrutura modular
-
----
-
-## Estrutura do Projeto
+## Arquitetura do Projeto
 
 ```
 sistema-ponto/
 │
-├── src/
-│   ├── __init__.py
+├── src/                # Lógica de negócio (CLI)
 │   ├── registro.py
 │   └── utils.py
 │
-├── data/
-│   └── ponto.csv
+├── web/                # Aplicação Flask
+│   ├── app.py
+│   ├── templates/
+│   └── database.db
 │
-├── tests/
+├── tests/              # Testes automatizados
+│   ├── test_registro.py
+│   └── test_web.py
 │
-├── main.py
+├── gui.py              # Interface gráfica (Tkinter)
+├── main.py             # Versão CLI
 ├── requirements.txt
 └── README.md
 ```
 
 ---
 
-## Como Executar
+## Decisões Técnicas
 
-1. Clone o repositório:
+### Separação de camadas
+- `src/` contém apenas regra de negócio.
+- `web/` contém camada HTTP e persistência.
+- Código desacoplado para facilitar testes.
+
+### Inversão de dependência
+Funções recebem caminho de arquivo como parâmetro, eliminando dependência de variáveis globais e aumentando testabilidade.
+
+### Testabilidade
+Uso de:
+- pytest
+- tmp_path
+- Flask test_client
+- pytest-cov
+
+---
+
+## Executando os Testes
+
+Instalar dependências:
 
 ```bash
-git clone https://github.com/seu-usuario/sistema-ponto.git
+pip install -r requirements.txt
 ```
 
-2. Acesse a pasta do projeto:
+Rodar testes:
 
 ```bash
-cd sistema-ponto
-```
-
-3. Execute o sistema:
-
-```bash
-python main.py
-```
-
----
-
-##  Como Funciona
-
-- O sistema cria automaticamente o arquivo `ponto.csv`
-- Ao registrar entrada, salva data e horário
-- Ao registrar saída, calcula automaticamente o total trabalhado
-- Os dados ficam armazenados na pasta `data/`
-
----
-
-##  Próximas Melhorias (Roadmap)
-
-- Testes automatizados com Pytest
-- Interface gráfica com Tkinter
-- Versão Web com Flask
-- Relatórios mensais automáticos
-- Controle de múltiplos usuários
-
----
-
-##  Objetivo do Projeto
-
-Este projeto foi desenvolvido como prática de organização de código,
-estruturação de sistema e futura implementação de testes automatizados,
-seguindo boas práticas para portfólio na área de QA.
-
----
-
-## Testes
-
-Para rodar os testes:
-
 python -m pytest
+```
+
+Rodar com cobertura:
+
+```bash
+python -m pytest --cov=web --cov=src
+```
+
+Gerar relatório HTML:
+
+```bash
+python -m pytest --cov=web --cov=src --cov-report=html
+```
+
+Abrir relatório:
+
+```
+htmlcov/index.html
+```
+
+Cobertura atual: 94%
 
 ---
 
-## Interface Gráfica
+## Executando a Aplicação Web
 
-Para rodar a versão com interface gráfica:
+```bash
+python web/app.py
+```
 
-python gui.py
+Acesse:
+
+```
+http://127.0.0.1:5000
+```
 
 ---
 
-Projeto para fins educacionais.
+## Tecnologias Utilizadas
+
+- Python 3.14
+- Flask
+- SQLite
+- Pytest
+- Pytest-cov
+- HTML / Bootstrap
+- Tkinter (GUI)
+
+---
+
+## Evolução do Projeto
+
+1. Versão CLI com CSV
+2. Refatoração para código desacoplado
+3. Interface gráfica
+4. Aplicação web com autenticação
+5. Testes automatizados
+6. Cobertura de código acima de 90%
+
+---
+
+## Objetivo do Projeto
+
+Demonstrar:
+
+- Capacidade de estruturar projeto real
+- Aplicar boas práticas de arquitetura
+- Criar testes automatizados
+- Medir cobertura
+- Garantir qualidade de software
+
+---
+
+## Autoria
+
+Projeto desenvolvido como parte de preparação para atuação como QA / QA Automation.

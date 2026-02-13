@@ -1,0 +1,239 @@
+from flask import Flask, render_template, request, redirect, session
+import sqlite3
+from datetime import datetime
+from werkzeug.security import generate_password_hash, check_password_hash
+from datetime import datetime, timedelta
+
+app = Flask(__name__)
+app.secret_key = "segredo_super_seguro"
+
+def conectar():
+    return sqlite3.connect("web/database.db")
+
+def criar_banco():
+    conn = conectar()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS usuarios (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT UNIQUE,
+        password TEXT
+    )
+    """)
+
+    cursor.execute("""
+CREATE TABLE IF NOT EXISTS registros (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    data TEXT,
+    entrada_manha TEXT,
+    saida_almoco TEXT,
+    volta_almoco TEXT,
+    saida_final TEXT,
+    FOREIGN KEY(user_id) REFERENCES usuarios(id)
+)
+""")
+
+
+    conn.commit()
+    conn.close()
+
+
+# =========================
+# LOGIN
+# =========================
+@app.route("/", methods=["GET", "POST"])
+def login():
+    if request.method == "POST":
+        username = request.form["username"]
+        password = request.form["password"]
+
+        conn = conectar()
+        cursor = conn.cursor()
+
+        cursor.execute("SELECT * FROM usuarios WHERE username=?", (username,))
+        user = cursor.fetchone()
+
+        conn.close()
+
+        if user and check_password_hash(user[2], password):
+            session["user_id"] = user[0]
+            return redirect("/dashboard")
+        else:
+            return render_template("login.html", erro="Usuário ou senha inválidos")
+
+    return render_template("login.html")
+
+# =========================
+# REGISTER
+# =========================
+@app.route("/register", methods=["GET", "POST"])
+def register():
+    if request.method == "POST":
+        username = request.form["username"]
+        password = generate_password_hash(request.form["password"])
+
+        conn = conectar()
+        cursor = conn.cursor()
+
+        try:
+            cursor.execute(
+                "INSERT INTO usuarios (username, password) VALUES (?, ?)",
+                (username, password)
+            )
+            conn.commit()
+        except sqlite3.IntegrityError:
+            conn.close()
+            return render_template("register.html", erro="Usuário já existe")
+
+        conn.close()
+        return redirect("/")
+
+    return render_template("register.html")
+
+
+# =========================
+# DASHBOARD
+# =========================
+
+@app.route("/dashboard")
+def dashboard():
+    if "user_id" not in session:
+        return redirect("/")
+
+    conn = conectar()
+    cursor = conn.cursor()
+
+    hoje = datetime.now().strftime("%Y-%m-%d")
+
+    cursor.execute("""
+        SELECT *
+        FROM registros
+        WHERE user_id=? AND data=?
+        ORDER BY id DESC
+    """, (session["user_id"], hoje))
+
+    registros_db = cursor.fetchall()
+    conn.close()
+
+    registros = []
+    total_geral = timedelta()
+
+    for r in registros_db:
+        entrada = r[3]
+        saida_almoco = r[4]
+        volta_almoco = r[5]
+        saida_final = r[6]
+
+        total_linha = timedelta()
+
+        if entrada and saida_almoco:
+            total_linha += (
+                datetime.strptime(saida_almoco, "%H:%M:%S")
+                - datetime.strptime(entrada, "%H:%M:%S")
+            )
+
+        if volta_almoco and saida_final:
+            total_linha += (
+                datetime.strptime(saida_final, "%H:%M:%S")
+                - datetime.strptime(volta_almoco, "%H:%M:%S")
+            )
+
+        total_geral += total_linha
+
+        registros.append({
+            "data": r[2],
+            "entrada": entrada,
+            "saida_almoco": saida_almoco,
+            "volta_almoco": volta_almoco,
+            "saida_final": saida_final,
+            "total": total_linha
+        })
+
+    return render_template("dashboard.html",
+                           registros=registros,
+                           total=total_geral)
+
+# =========================
+# BATER
+# =========================
+
+@app.route("/bater")
+def bater():
+    if "user_id" not in session:
+        return redirect("/")
+
+    hoje = datetime.now().strftime("%Y-%m-%d")
+    hora_atual = datetime.now().strftime("%H:%M:%S")
+
+    conn = conectar()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        SELECT * FROM registros
+        WHERE user_id=? AND data=?
+        ORDER BY id DESC LIMIT 1
+    """, (session["user_id"], hoje))
+
+    registro = cursor.fetchone()
+
+    if not registro:
+        # Primeira batida do dia
+        cursor.execute("""
+            INSERT INTO registros (user_id, data, entrada_manha)
+            VALUES (?, ?, ?)
+        """, (session["user_id"], hoje, hora_atual))
+
+    else:
+        id_registro = registro[0]
+
+        entrada_manha = registro[3]
+        saida_almoco = registro[4]
+        volta_almoco = registro[5]
+        saida_final = registro[6]
+
+        if not saida_almoco:
+            cursor.execute(
+                "UPDATE registros SET saida_almoco=? WHERE id=?",
+                (hora_atual, id_registro)
+            )
+        elif not volta_almoco:
+            cursor.execute(
+                "UPDATE registros SET volta_almoco=? WHERE id=?",
+                (hora_atual, id_registro)
+            )
+        elif not saida_final:
+            cursor.execute(
+                "UPDATE registros SET saida_final=? WHERE id=?",
+                (hora_atual, id_registro)
+            )
+        else:
+            # Já completou o dia → cria novo registro
+            cursor.execute("""
+                INSERT INTO registros (user_id, data, entrada_manha)
+                VALUES (?, ?, ?)
+            """, (session["user_id"], hoje, hora_atual))
+
+    conn.commit()
+    conn.close()
+
+    return redirect("/dashboard")
+
+# =========================
+# LOGOUT
+# =========================
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect("/")
+
+
+# =========================
+# START APP
+# =========================
+
+if __name__ == "__main__":
+    criar_banco()
+    app.run(debug=True)

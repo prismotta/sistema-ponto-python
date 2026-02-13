@@ -1,11 +1,19 @@
+import os
 from flask import Flask, render_template, request, redirect, session
 import sqlite3
-import os
 from datetime import datetime, timedelta
 from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
-app.secret_key = "segredo_super_seguro"
+
+# =========================
+# CONFIGURAÇÕES SEGURAS
+# =========================
+
+app.secret_key = os.getenv("SECRET_KEY", "dev_secret_key")
+
+DATABASE_PATH = os.getenv("DATABASE_PATH", "web/database.db")
+
 
 
 # =========================
@@ -13,7 +21,8 @@ app.secret_key = "segredo_super_seguro"
 # =========================
 
 def conectar():
-    return sqlite3.connect("web/database.db")
+    return sqlite3.connect(DATABASE_PATH)
+
 
 
 def criar_banco():

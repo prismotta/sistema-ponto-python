@@ -1,3 +1,5 @@
+![CI](https://github.com/prismotta/sistema-ponto-python/actions/workflows/ci.yml/badge.svg)
+
 # Sistema de Ponto - Projeto QA
 
 Sistema completo de controle de ponto desenvolvido em Python com foco em qualidade, testabilidade e boas práticas de arquitetura.

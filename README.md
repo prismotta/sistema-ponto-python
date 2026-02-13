@@ -102,4 +102,12 @@ python -m pytest
 
 ---
 
+## Interface Gráfica
+
+Para rodar a versão com interface gráfica:
+
+python gui.py
+
+---
+
 Projeto para fins educacionais.

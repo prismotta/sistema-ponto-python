@@ -31,15 +31,14 @@ def bater_saida():
             break
 
     if horas is None:
-        print("⚠️ Nenhuma entrada encontrada para registrar saída.")
-        return
+        return False, None
 
     with open(ARQUIVO, mode="w", newline="") as file:
         writer = csv.writer(file)
         writer.writerows(reader)
 
-    print(f"✅ Saída registrada às {hora_saida}")
-    print(f"🕒 Total trabalhado: {horas}")
+    return True, horas
+
 
 def calcular_horas(entrada_str, saida_str):
     entrada = datetime.strptime(entrada_str, "%H:%M:%S")

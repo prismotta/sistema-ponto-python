@@ -2,6 +2,9 @@
 
 # Sistema de Ponto - Projeto QA
 
+Aplicação em produção:  
+https://sistema-ponto-python.onrender.com/
+
 Sistema completo de controle de ponto desenvolvido em Python com foco em qualidade, testabilidade e boas práticas de arquitetura.
 
 O projeto evoluiu de uma versão CLI para interface gráfica e, posteriormente, para uma aplicação web com autenticação, banco de dados e testes automatizados com alta cobertura.
@@ -119,7 +122,7 @@ Cobertura atual: 94%
 
 ---
 
-## Executando a Aplicação Web
+## Executando a Aplicação Web Localmente
 
 ```bash
 python web/app.py
@@ -135,7 +138,7 @@ http://127.0.0.1:5000
 
 ## Tecnologias Utilizadas
 
-- Python 3.14
+- Python 3.11+
 - Flask
 - SQLite
 - Pytest
@@ -145,14 +148,24 @@ http://127.0.0.1:5000
 
 ---
 
+## Deploy
+
+Aplicação hospedada em ambiente público utilizando Render.
+
+URL:  
+https://sistema-ponto-python.onrender.com/
+
+---
+
 ## Evolução do Projeto
 
-1. Versão CLI com CSV
-2. Refatoração para código desacoplado
-3. Interface gráfica
-4. Aplicação web com autenticação
-5. Testes automatizados
-6. Cobertura de código acima de 90%
+1. Versão CLI com CSV  
+2. Refatoração para código desacoplado  
+3. Interface gráfica  
+4. Aplicação web com autenticação  
+5. Testes automatizados  
+6. Cobertura de código acima de 90%  
+7. Deploy em ambiente público  
 
 ---
 
@@ -160,14 +173,16 @@ http://127.0.0.1:5000
 
 Demonstrar:
 
-- Capacidade de estruturar projeto real
-- Aplicar boas práticas de arquitetura
-- Criar testes automatizados
-- Medir cobertura
-- Garantir qualidade de software
+- Capacidade de estruturar projeto real  
+- Aplicar boas práticas de arquitetura  
+- Criar testes automatizados  
+- Medir cobertura  
+- Garantir qualidade de software  
+- Implementar CI com GitHub Actions  
+- Realizar deploy contínuo  
 
 ---
 
 ## Autoria
 
-Projeto desenvolvido como parte de preparação para atuação como QA / QA Automation.
+Projeto desenvolvido como parte da preparação para atuação como QA / QA Automation.

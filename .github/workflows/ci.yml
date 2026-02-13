@@ -27,4 +27,5 @@ jobs:
 
     - name: Rodar testes
       run: |
-        pytest --cov=src --cov=web --cov-report=term
+        PYTHONPATH=. pytest --cov=src --cov=web --cov-report=term
+

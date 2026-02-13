@@ -1,23 +1,24 @@
 import csv
 from datetime import datetime
-from src.utils import ARQUIVO
 
-def bater_entrada():
+
+def bater_entrada(arquivo):
     agora = datetime.now()
     data = agora.strftime("%d/%m/%Y")
     hora = agora.strftime("%H:%M:%S")
 
-    with open(ARQUIVO, mode="a", newline="") as file:
+    with open(arquivo, mode="a", newline="") as file:
         writer = csv.writer(file)
         writer.writerow([data, hora, "", ""])
 
-    print(f"✅ Entrada registrada às {hora}")
+    return True
 
-def bater_saida():
+
+def bater_saida(arquivo):
     agora = datetime.now()
     hora_saida = agora.strftime("%H:%M:%S")
 
-    with open(ARQUIVO, mode="r") as file:
+    with open(arquivo, mode="r") as file:
         reader = list(csv.reader(file))
 
     horas = None
@@ -33,7 +34,7 @@ def bater_saida():
     if horas is None:
         return False, None
 
-    with open(ARQUIVO, mode="w", newline="") as file:
+    with open(arquivo, mode="w", newline="") as file:
         writer = csv.writer(file)
         writer.writerows(reader)
 

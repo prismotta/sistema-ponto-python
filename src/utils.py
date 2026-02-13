@@ -1,12 +1,14 @@
 import os
 import csv
 
-ARQUIVO = "data/ponto.csv"
 
-def inicializar_arquivo():
-    os.makedirs("data", exist_ok=True)
+def inicializar_arquivo(arquivo):
+    pasta = os.path.dirname(arquivo)
 
-    if not os.path.exists(ARQUIVO):
-        with open(ARQUIVO, mode="w", newline="") as file:
+    if pasta:
+        os.makedirs(pasta, exist_ok=True)
+
+    if not os.path.exists(arquivo):
+        with open(arquivo, mode="w", newline="") as file:
             writer = csv.writer(file)
             writer.writerow(["Data", "Entrada", "Saida", "Horas Trabalhadas"])

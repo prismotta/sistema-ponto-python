@@ -1,8 +1,10 @@
 import os
-from flask import Flask, render_template, request, redirect, session
 import sqlite3
+from flask import Flask, render_template, request, redirect, session
 from datetime import datetime, timedelta
 from werkzeug.security import generate_password_hash, check_password_hash
+from zoneinfo import ZoneInfo
+
 
 app = Flask(__name__)
 
@@ -11,9 +13,8 @@ app = Flask(__name__)
 # =========================
 
 app.secret_key = os.getenv("SECRET_KEY", "dev_secret_key")
-
 DATABASE_PATH = os.getenv("DATABASE_PATH", "web/database.db")
-
+TIMEZONE = os.getenv("APP_TIMEZONE", "America/Sao_Paulo")
 
 
 # =========================
@@ -22,7 +23,6 @@ DATABASE_PATH = os.getenv("DATABASE_PATH", "web/database.db")
 
 def conectar():
     return sqlite3.connect(DATABASE_PATH)
-
 
 
 def criar_banco():
@@ -74,8 +74,8 @@ def login():
         if user and check_password_hash(user[2], password):
             session["user_id"] = user[0]
             return redirect("/dashboard")
-        else:
-            return render_template("login.html", erro="Usuário ou senha inválidos")
+
+        return render_template("login.html", erro="Usuário ou senha inválidos")
 
     return render_template("login.html")
 
@@ -118,10 +118,11 @@ def dashboard():
     if "user_id" not in session:
         return redirect("/")
 
+    agora = datetime.now(ZoneInfo(TIMEZONE))
+    hoje = agora.strftime("%Y-%m-%d")
+
     conn = conectar()
     cursor = conn.cursor()
-
-    hoje = datetime.now().strftime("%Y-%m-%d")
 
     cursor.execute("""
         SELECT *
@@ -167,11 +168,7 @@ def dashboard():
             "total": total_linha
         })
 
-    return render_template(
-        "dashboard.html",
-        registros=registros,
-        total=total_geral
-    )
+    return render_template("dashboard.html", registros=registros, total=total_geral)
 
 
 # =========================
@@ -183,8 +180,9 @@ def bater():
     if "user_id" not in session:
         return redirect("/")
 
-    hoje = datetime.now().strftime("%Y-%m-%d")
-    hora_atual = datetime.now().strftime("%H:%M:%S")
+    agora = datetime.now(ZoneInfo(TIMEZONE))
+    hoje = agora.strftime("%Y-%m-%d")
+    hora_atual = agora.strftime("%H:%M:%S")
 
     conn = conectar()
     cursor = conn.cursor()
@@ -250,4 +248,3 @@ if __name__ == "__main__":
     criar_banco()
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
-    

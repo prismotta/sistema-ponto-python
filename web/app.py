@@ -4,6 +4,9 @@ from flask import Flask, render_template, request, redirect, session
 from datetime import datetime, timedelta
 from werkzeug.security import generate_password_hash, check_password_hash
 from zoneinfo import ZoneInfo
+import psycopg2
+from urllib.parse import urlparse
+
 
 
 app = Flask(__name__)
@@ -22,7 +25,22 @@ TIMEZONE = os.getenv("APP_TIMEZONE", "America/Sao_Paulo")
 # =========================
 
 def conectar():
-    return sqlite3.connect(DATABASE_PATH)
+    database_url = os.getenv("DATABASE_URL")
+
+    if database_url:
+        # Produção → PostgreSQL (Neon)
+        result = urlparse(database_url)
+        return psycopg2.connect(
+            dbname=result.path[1:],
+            user=result.username,
+            password=result.password,
+            host=result.hostname,
+            port=result.port
+        )
+    else:
+        # Local → SQLite
+        return sqlite3.connect(DATABASE_PATH)
+
 
 
 def criar_banco():
@@ -31,7 +49,7 @@ def criar_banco():
 
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS usuarios (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             username TEXT UNIQUE,
             password TEXT
         )
@@ -39,7 +57,7 @@ def criar_banco():
 
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS registros (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             user_id INTEGER,
             data TEXT,
             entrada_manha TEXT,

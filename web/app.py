@@ -7,70 +7,93 @@ from zoneinfo import ZoneInfo
 import psycopg2
 from urllib.parse import urlparse
 
-
-
 app = Flask(__name__)
 
 # =========================
-# CONFIGURAÇÕES SEGURAS
+# CONFIGURAÇÕES
 # =========================
 
 app.secret_key = os.getenv("SECRET_KEY", "dev_secret_key")
 DATABASE_PATH = os.getenv("DATABASE_PATH", "web/database.db")
 TIMEZONE = os.getenv("APP_TIMEZONE", "America/Sao_Paulo")
 
+IS_POSTGRES = bool(os.getenv("DATABASE_URL"))
 
 # =========================
 # BANCO
 # =========================
 
 def conectar():
-    database_url = os.getenv("DATABASE_URL")
-
-    if database_url:
-        # Produção → PostgreSQL (Neon)
+    if IS_POSTGRES:
+        database_url = os.getenv("DATABASE_URL")
         result = urlparse(database_url)
         return psycopg2.connect(
             dbname=result.path[1:],
             user=result.username,
             password=result.password,
             host=result.hostname,
-            port=result.port
+            port=result.port,
         )
     else:
-        # Local → SQLite
         return sqlite3.connect(DATABASE_PATH)
 
+
+def sql(query):
+    """Converte placeholders automaticamente para Postgres"""
+    if IS_POSTGRES:
+        return query.replace("?", "%s")
+    return query
 
 
 def criar_banco():
     conn = conectar()
     cursor = conn.cursor()
 
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS usuarios (
-            id SERIAL PRIMARY KEY,
-            username TEXT UNIQUE,
-            password TEXT
-        )
-    """)
+    if IS_POSTGRES:
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS usuarios (
+                id SERIAL PRIMARY KEY,
+                username TEXT UNIQUE,
+                password TEXT
+            )
+        """)
 
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS registros (
-            id SERIAL PRIMARY KEY,
-            user_id INTEGER,
-            data TEXT,
-            entrada_manha TEXT,
-            saida_almoco TEXT,
-            volta_almoco TEXT,
-            saida_final TEXT,
-            FOREIGN KEY(user_id) REFERENCES usuarios(id)
-        )
-    """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS registros (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER,
+                data TEXT,
+                entrada_manha TEXT,
+                saida_almoco TEXT,
+                volta_almoco TEXT,
+                saida_final TEXT,
+                FOREIGN KEY(user_id) REFERENCES usuarios(id)
+            )
+        """)
+    else:
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS usuarios (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT UNIQUE,
+                password TEXT
+            )
+        """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS registros (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                data TEXT,
+                entrada_manha TEXT,
+                saida_almoco TEXT,
+                volta_almoco TEXT,
+                saida_final TEXT,
+                FOREIGN KEY(user_id) REFERENCES usuarios(id)
+            )
+        """)
 
     conn.commit()
     conn.close()
-
 
 # =========================
 # LOGIN
@@ -85,7 +108,11 @@ def login():
         conn = conectar()
         cursor = conn.cursor()
 
-        cursor.execute("SELECT * FROM usuarios WHERE username=?", (username,))
+        cursor.execute(
+            sql("SELECT * FROM usuarios WHERE username=?"),
+            (username,)
+        )
+
         user = cursor.fetchone()
         conn.close()
 
@@ -96,7 +123,6 @@ def login():
         return render_template("login.html", erro="Usuário ou senha inválidos")
 
     return render_template("login.html")
-
 
 # =========================
 # REGISTER
@@ -113,11 +139,11 @@ def register():
 
         try:
             cursor.execute(
-                "INSERT INTO usuarios (username, password) VALUES (?, ?)",
+                sql("INSERT INTO usuarios (username, password) VALUES (?, ?)"),
                 (username, password)
             )
             conn.commit()
-        except sqlite3.IntegrityError:
+        except Exception:
             conn.close()
             return render_template("register.html", erro="Usuário já existe")
 
@@ -125,7 +151,6 @@ def register():
         return redirect("/")
 
     return render_template("register.html")
-
 
 # =========================
 # DASHBOARD
@@ -142,12 +167,15 @@ def dashboard():
     conn = conectar()
     cursor = conn.cursor()
 
-    cursor.execute("""
-        SELECT *
-        FROM registros
-        WHERE user_id=? AND data=?
-        ORDER BY id DESC
-    """, (session["user_id"], hoje))
+    cursor.execute(
+        sql("""
+            SELECT *
+            FROM registros
+            WHERE user_id=? AND data=?
+            ORDER BY id DESC
+        """),
+        (session["user_id"], hoje)
+    )
 
     registros_db = cursor.fetchall()
     conn.close()
@@ -188,7 +216,6 @@ def dashboard():
 
     return render_template("dashboard.html", registros=registros, total=total_geral)
 
-
 # =========================
 # BATER PONTO
 # =========================
@@ -205,48 +232,56 @@ def bater():
     conn = conectar()
     cursor = conn.cursor()
 
-    cursor.execute("""
-        SELECT * FROM registros
-        WHERE user_id=? AND data=?
-        ORDER BY id DESC LIMIT 1
-    """, (session["user_id"], hoje))
+    cursor.execute(
+        sql("""
+            SELECT * FROM registros
+            WHERE user_id=? AND data=?
+            ORDER BY id DESC LIMIT 1
+        """),
+        (session["user_id"], hoje)
+    )
 
     registro = cursor.fetchone()
 
     if not registro:
-        cursor.execute("""
-            INSERT INTO registros (user_id, data, entrada_manha)
-            VALUES (?, ?, ?)
-        """, (session["user_id"], hoje, hora_atual))
+        cursor.execute(
+            sql("""
+                INSERT INTO registros (user_id, data, entrada_manha)
+                VALUES (?, ?, ?)
+            """),
+            (session["user_id"], hoje, hora_atual)
+        )
     else:
         id_registro = registro[0]
 
         if not registro[4]:
             cursor.execute(
-                "UPDATE registros SET saida_almoco=? WHERE id=?",
+                sql("UPDATE registros SET saida_almoco=? WHERE id=?"),
                 (hora_atual, id_registro)
             )
         elif not registro[5]:
             cursor.execute(
-                "UPDATE registros SET volta_almoco=? WHERE id=?",
+                sql("UPDATE registros SET volta_almoco=? WHERE id=?"),
                 (hora_atual, id_registro)
             )
         elif not registro[6]:
             cursor.execute(
-                "UPDATE registros SET saida_final=? WHERE id=?",
+                sql("UPDATE registros SET saida_final=? WHERE id=?"),
                 (hora_atual, id_registro)
             )
         else:
-            cursor.execute("""
-                INSERT INTO registros (user_id, data, entrada_manha)
-                VALUES (?, ?, ?)
-            """, (session["user_id"], hoje, hora_atual))
+            cursor.execute(
+                sql("""
+                    INSERT INTO registros (user_id, data, entrada_manha)
+                    VALUES (?, ?, ?)
+                """),
+                (session["user_id"], hoje, hora_atual)
+            )
 
     conn.commit()
     conn.close()
 
     return redirect("/dashboard")
-
 
 # =========================
 # LOGOUT
@@ -257,9 +292,8 @@ def logout():
     session.clear()
     return redirect("/")
 
-
 # =========================
-# START APP (PRODUÇÃO)
+# START APP
 # =========================
 
 if __name__ == "__main__":

@@ -2,3 +2,4 @@ flask
 pytest
 pytest-cov
 werkzeug
+psycopg2-binary

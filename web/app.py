@@ -1,21 +1,42 @@
+"""
+Sistema de Ponto - Aplicação Web
+
+Aplicação Flask responsável por:
+
+- Autenticação de usuários
+- Registro de ponto
+- Cálculo de horas trabalhadas
+- Persistência híbrida (SQLite local / PostgreSQL produção)
+
+Compatível com:
+- Render (PostgreSQL via DATABASE_URL)
+- Execução local (SQLite)
+
+O banco é selecionado automaticamente via variável de ambiente.
+"""
+
 import os
 import sqlite3
 from urllib.parse import urlparse
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
+from typing import Optional, Tuple, Any
 
 import psycopg2
 from flask import Flask, render_template, request, redirect, session
 from werkzeug.security import generate_password_hash, check_password_hash
 
 
-# =====================================
-# CONFIGURAÇÕES
-# =====================================
+# ==========================================================
+# CONFIGURAÇÃO DA APLICAÇÃO
+# ==========================================================
 
 app = Flask(__name__)
 
-app.secret_key = os.getenv("SECRET_KEY", "dev_secret_key")
+app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "dev_secret_key")
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+
 DATABASE_PATH = os.getenv("DATABASE_PATH", "web/database.db")
 DATABASE_URL = os.getenv("DATABASE_URL")
 TIMEZONE = os.getenv("APP_TIMEZONE", "America/Sao_Paulo")
@@ -23,11 +44,17 @@ TIMEZONE = os.getenv("APP_TIMEZONE", "America/Sao_Paulo")
 IS_POSTGRES = bool(DATABASE_URL)
 
 
-# =====================================
+# ==========================================================
 # BANCO DE DADOS
-# =====================================
+# ==========================================================
 
 def conectar():
+    """
+    Retorna conexão com banco de dados.
+
+    - Se DATABASE_URL estiver definida → PostgreSQL.
+    - Caso contrário → SQLite local.
+    """
     if IS_POSTGRES:
         result = urlparse(DATABASE_URL)
         return psycopg2.connect(
@@ -42,16 +69,23 @@ def conectar():
 
 def sql(query: str) -> str:
     """
-    Converte placeholders automaticamente:
-    SQLite  -> ?
-    Postgres -> %s
+    Converte placeholders automaticamente.
+
+    SQLite usa '?'.
+    PostgreSQL usa '%s'.
+
+    Essa função garante compatibilidade entre os dois.
     """
     if IS_POSTGRES:
         return query.replace("?", "%s")
     return query
 
 
-def criar_banco():
+def criar_banco() -> None:
+    """
+    Cria as tabelas necessárias caso não existam.
+    Não altera estrutura existente.
+    """
     conn = conectar()
     cursor = conn.cursor()
 
@@ -59,7 +93,7 @@ def criar_banco():
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS usuarios (
                 id SERIAL PRIMARY KEY,
-                username TEXT UNIQUE,
+                username TEXT UNIQUE NOT NULL,
                 password TEXT NOT NULL
             )
         """)
@@ -78,7 +112,7 @@ def criar_banco():
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS usuarios (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                username TEXT UNIQUE,
+                username TEXT UNIQUE NOT NULL,
                 password TEXT NOT NULL
             )
         """)
@@ -99,27 +133,70 @@ def criar_banco():
     conn.close()
 
 
-# =====================================
-# HELPERS
-# =====================================
+# ==========================================================
+# FUNÇÕES AUXILIARES
+# ==========================================================
 
-def agora():
+def agora() -> datetime:
+    """
+    Retorna datetime atual considerando timezone configurado.
+    """
     return datetime.now(ZoneInfo(TIMEZONE))
 
 
-def usuario_logado():
+def usuario_logado() -> bool:
+    """
+    Verifica se existe usuário autenticado na sessão.
+    """
     return "user_id" in session
 
 
-# =====================================
+def calcular_total_registro(registro: Tuple[Any, ...]) -> timedelta:
+    """
+    Calcula o total trabalhado de um registro.
+
+    Recebe tupla retornada do banco.
+    Retorna timedelta correspondente ao total do dia.
+    """
+    entrada, saida_almoco, volta_almoco, saida_final = (
+        registro[3],
+        registro[4],
+        registro[5],
+        registro[6],
+    )
+
+    total = timedelta()
+
+    if entrada and saida_almoco:
+        total += (
+            datetime.strptime(saida_almoco, "%H:%M:%S")
+            - datetime.strptime(entrada, "%H:%M:%S")
+        )
+
+    if volta_almoco and saida_final:
+        total += (
+            datetime.strptime(saida_final, "%H:%M:%S")
+            - datetime.strptime(volta_almoco, "%H:%M:%S")
+        )
+
+    return total
+
+
+# ==========================================================
 # ROTAS
-# =====================================
+# ==========================================================
 
 @app.route("/", methods=["GET", "POST"])
 def login():
+    """
+    Realiza autenticação do usuário.
+    """
     if request.method == "POST":
-        username = request.form["username"]
-        password = request.form["password"]
+        username = request.form.get("username")
+        password = request.form.get("password")
+
+        if not username or not password:
+            return render_template("login.html", erro="Preencha todos os campos")
 
         conn = conectar()
         cursor = conn.cursor()
@@ -142,9 +219,17 @@ def login():
 
 @app.route("/register", methods=["GET", "POST"])
 def register():
+    """
+    Registra novo usuário.
+    """
     if request.method == "POST":
-        username = request.form["username"]
-        password = generate_password_hash(request.form["password"])
+        username = request.form.get("username")
+        password = request.form.get("password")
+
+        if not username or not password:
+            return render_template("register.html", erro="Preencha todos os campos")
+
+        senha_hash = generate_password_hash(password)
 
         conn = conectar()
         cursor = conn.cursor()
@@ -152,7 +237,7 @@ def register():
         try:
             cursor.execute(
                 sql("INSERT INTO usuarios (username, password) VALUES (?, ?)"),
-                (username, password)
+                (username, senha_hash)
             )
             conn.commit()
         except Exception:
@@ -167,6 +252,9 @@ def register():
 
 @app.route("/dashboard")
 def dashboard():
+    """
+    Exibe histórico de registros e totais (dia atual e acumulado).
+    """
     if not usuario_logado():
         return redirect("/")
 
@@ -179,50 +267,51 @@ def dashboard():
         sql("""
             SELECT *
             FROM registros
-            WHERE user_id=? AND data=?
-            ORDER BY id DESC
+            WHERE user_id=?
+            ORDER BY data DESC, id DESC
         """),
-        (session["user_id"], hoje)
+        (session["user_id"],)
     )
 
     registros_db = cursor.fetchall()
     conn.close()
 
     registros = []
-    total_geral = timedelta()
+    total_hoje = timedelta()
+    total_acumulado = timedelta()
 
-    for r in registros_db:
-        entrada, saida_almoco, volta_almoco, saida_final = r[3], r[4], r[5], r[6]
-        total_linha = timedelta()
-
-        if entrada and saida_almoco:
-            total_linha += (
-                datetime.strptime(saida_almoco, "%H:%M:%S")
-                - datetime.strptime(entrada, "%H:%M:%S")
-            )
-
-        if volta_almoco and saida_final:
-            total_linha += (
-                datetime.strptime(saida_final, "%H:%M:%S")
-                - datetime.strptime(volta_almoco, "%H:%M:%S")
-            )
-
-        total_geral += total_linha
+    for registro in registros_db:
+        total_linha = calcular_total_registro(registro)
+        total_acumulado += total_linha
+        if registro[2] == hoje:
+            total_hoje += total_linha
 
         registros.append({
-            "data": r[2],
-            "entrada": entrada,
-            "saida_almoco": saida_almoco,
-            "volta_almoco": volta_almoco,
-            "saida_final": saida_final,
+            "data": registro[2],
+            "entrada": registro[3],
+            "saida_almoco": registro[4],
+            "volta_almoco": registro[5],
+            "saida_final": registro[6],
             "total": total_linha
         })
 
-    return render_template("dashboard.html", registros=registros, total=total_geral)
+    return render_template(
+        "dashboard.html",
+        registros=registros,
+        total_hoje=total_hoje,
+        total_acumulado=total_acumulado,
+    )
 
 
 @app.route("/bater")
 def bater():
+    """
+    Registra próxima etapa do ponto:
+    - Entrada
+    - Saída almoço
+    - Volta almoço
+    - Saída final
+    """
     if not usuario_logado():
         return redirect("/")
 
@@ -253,14 +342,20 @@ def bater():
         id_registro = registro[0]
 
         if not registro[4]:
-            cursor.execute(sql("UPDATE registros SET saida_almoco=? WHERE id=?"),
-                           (hora_atual, id_registro))
+            cursor.execute(
+                sql("UPDATE registros SET saida_almoco=? WHERE id=?"),
+                (hora_atual, id_registro)
+            )
         elif not registro[5]:
-            cursor.execute(sql("UPDATE registros SET volta_almoco=? WHERE id=?"),
-                           (hora_atual, id_registro))
+            cursor.execute(
+                sql("UPDATE registros SET volta_almoco=? WHERE id=?"),
+                (hora_atual, id_registro)
+            )
         elif not registro[6]:
-            cursor.execute(sql("UPDATE registros SET saida_final=? WHERE id=?"),
-                           (hora_atual, id_registro))
+            cursor.execute(
+                sql("UPDATE registros SET saida_final=? WHERE id=?"),
+                (hora_atual, id_registro)
+            )
         else:
             cursor.execute(
                 sql("INSERT INTO registros (user_id, data, entrada_manha) VALUES (?, ?, ?)"),
@@ -275,13 +370,16 @@ def bater():
 
 @app.route("/logout")
 def logout():
+    """
+    Encerra sessão do usuário.
+    """
     session.clear()
     return redirect("/")
 
 
-# =====================================
-# START
-# =====================================
+# ==========================================================
+# INICIALIZAÇÃO
+# ==========================================================
 
 if __name__ == "__main__":
     criar_banco()

@@ -123,3 +123,42 @@ def test_fluxo_bater_ponto(client):
     # Verificar que as colunas aparecem preenchidas
     assert b"Sa\xc3\xadda Final" in response.data or b"Sa\xc3\xadda Final" in response.data
 
+
+def test_dashboard_mostra_historico_de_dias_anteriores(client):
+    # Criar usuário e logar
+    client.post("/register", data={
+        "username": "teste",
+        "password": "1234"
+    })
+    client.post("/", data={
+        "username": "teste",
+        "password": "1234"
+    })
+
+    # Cria ao menos um registro de hoje
+    client.get("/bater")
+
+    # Insere manualmente um registro completo de ontem para simular histórico
+    import sqlite3
+    from datetime import datetime, timedelta
+
+    ontem = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+
+    conn = sqlite3.connect("web/database.db")
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        INSERT INTO registros (user_id, data, entrada_manha, saida_almoco, volta_almoco, saida_final)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (1, ontem, "08:00:00", "12:00:00", "13:00:00", "17:00:00")
+    )
+    conn.commit()
+    conn.close()
+
+    response = client.get("/dashboard")
+    assert response.status_code == 200
+    assert b"Total de hoje" in response.data
+    assert b"Total acumulado" in response.data
+    assert ontem.encode("utf-8") in response.data
+

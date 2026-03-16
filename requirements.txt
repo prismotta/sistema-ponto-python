@@ -1,5 +1,5 @@
-flask
-pytest
-pytest-cov
-werkzeug
-psycopg2-binary
+Flask==3.0.2
+gunicorn==21.2.0
+psycopg2-binary==2.9.9
+pytest==8.2.0
+pytest-cov==5.0.0

@@ -162,3 +162,56 @@ def test_dashboard_mostra_historico_de_dias_anteriores(client):
     assert b"Total acumulado" in response.data
     assert ontem.encode("utf-8") in response.data
 
+
+def test_criar_banco_migra_registros_legado_sem_colunas_novas():
+    app.config["TESTING"] = True
+    app.config["SECRET_KEY"] = "test"
+
+    if os.path.exists("web/database.db"):
+        os.remove("web/database.db")
+
+    import sqlite3
+
+    # Simula um banco legado: tabela `registros` existe mas não tem as colunas novas
+    conn = sqlite3.connect("web/database.db")
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE usuarios (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            password TEXT NOT NULL
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE registros (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            data TEXT,
+            entrada_manha TEXT,
+            FOREIGN KEY(user_id) REFERENCES usuarios(id)
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+    criar_banco()
+
+    conn = sqlite3.connect("web/database.db")
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA table_info(registros)")
+    colunas = {row[1] for row in cursor.fetchall()}
+    conn.close()
+
+    assert {"entrada_manha", "saida_almoco", "volta_almoco", "saida_final"}.issubset(colunas)
+
+    with app.test_client() as client:
+        client.post("/register", data={"username": "teste", "password": "1234"})
+        client.post("/", data={"username": "teste", "password": "1234"})
+
+        # Deve conseguir fazer batidas sem erro, mesmo partindo de schema legado
+        client.get("/bater")
+        client.get("/bater")
+
+        response = client.get("/dashboard")
+        assert response.status_code == 200
+

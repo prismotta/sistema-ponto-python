@@ -84,7 +84,9 @@ def sql(query: str) -> str:
 def criar_banco() -> None:
     """
     Cria as tabelas necessárias caso não existam.
-    Não altera estrutura existente.
+    Garante também compatibilidade com bancos legados:
+    - Adiciona colunas ausentes na tabela `registros` (quando a estrutura antiga
+      não possuía campos de almoço/saída final).
     """
     conn = conectar()
     cursor = conn.cursor()
@@ -108,6 +110,10 @@ def criar_banco() -> None:
                 saida_final TEXT
             )
         """)
+
+        # Migração: adiciona colunas ausentes em bases antigas
+        for coluna in ("entrada_manha", "saida_almoco", "volta_almoco", "saida_final"):
+            cursor.execute(f"ALTER TABLE registros ADD COLUMN IF NOT EXISTS {coluna} TEXT")
     else:
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS usuarios (
@@ -128,6 +134,13 @@ def criar_banco() -> None:
                 FOREIGN KEY(user_id) REFERENCES usuarios(id)
             )
         """)
+
+        # Migração: adiciona colunas ausentes em bases antigas (SQLite)
+        cursor.execute("PRAGMA table_info(registros)")
+        colunas_existentes = {row[1] for row in cursor.fetchall()}
+        for coluna in ("entrada_manha", "saida_almoco", "volta_almoco", "saida_final"):
+            if coluna not in colunas_existentes:
+                cursor.execute(f"ALTER TABLE registros ADD COLUMN {coluna} TEXT")
 
     conn.commit()
     conn.close()

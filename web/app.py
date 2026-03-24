@@ -21,6 +21,7 @@ from urllib.parse import urlparse
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from typing import Optional, Tuple, Any
+import threading
 
 import psycopg2
 from flask import Flask, render_template, request, redirect, session
@@ -42,6 +43,9 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 TIMEZONE = os.getenv("APP_TIMEZONE", "America/Sao_Paulo")
 
 IS_POSTGRES = bool(DATABASE_URL)
+
+_db_init_lock = threading.Lock()
+_db_init_done = False
 
 
 # ==========================================================
@@ -140,7 +144,13 @@ def criar_banco() -> None:
         colunas_existentes = {row[1] for row in cursor.fetchall()}
         for coluna in ("entrada_manha", "saida_almoco", "volta_almoco", "saida_final"):
             if coluna not in colunas_existentes:
-                cursor.execute(f"ALTER TABLE registros ADD COLUMN {coluna} TEXT")
+                try:
+                    cursor.execute(f"ALTER TABLE registros ADD COLUMN {coluna} TEXT")
+                except sqlite3.OperationalError as e:
+                    # Se dois processos tentarem migrar ao mesmo tempo, o segundo pode
+                    # receber "duplicate column name". Nesse caso, basta ignorar.
+                    if "duplicate column name" not in str(e).lower():
+                        raise
 
     conn.commit()
     conn.close()
@@ -149,6 +159,27 @@ def criar_banco() -> None:
 # ==========================================================
 # FUNÇÕES AUXILIARES
 # ==========================================================
+
+def parse_hora(hora: Optional[str]) -> Optional[datetime]:
+    """
+    Faz parse de strings de hora vindas do banco.
+
+    Aceita formatos legados como:
+    - HH:MM
+    - HH:MM:SS
+    - HH:MM:SS.ffffff
+    """
+    if not hora:
+        return None
+
+    for fmt in ("%H:%M:%S", "%H:%M", "%H:%M:%S.%f"):
+        try:
+            return datetime.strptime(hora, fmt)
+        except ValueError:
+            continue
+
+    return None
+
 
 def agora() -> datetime:
     """
@@ -180,17 +211,16 @@ def calcular_total_registro(registro: Tuple[Any, ...]) -> timedelta:
 
     total = timedelta()
 
-    if entrada and saida_almoco:
-        total += (
-            datetime.strptime(saida_almoco, "%H:%M:%S")
-            - datetime.strptime(entrada, "%H:%M:%S")
-        )
+    entrada_dt = parse_hora(entrada)
+    saida_almoco_dt = parse_hora(saida_almoco)
+    volta_almoco_dt = parse_hora(volta_almoco)
+    saida_final_dt = parse_hora(saida_final)
 
-    if volta_almoco and saida_final:
-        total += (
-            datetime.strptime(saida_final, "%H:%M:%S")
-            - datetime.strptime(volta_almoco, "%H:%M:%S")
-        )
+    if entrada_dt and saida_almoco_dt and saida_almoco_dt >= entrada_dt:
+        total += (saida_almoco_dt - entrada_dt)
+
+    if volta_almoco_dt and saida_final_dt and saida_final_dt >= volta_almoco_dt:
+        total += (saida_final_dt - volta_almoco_dt)
 
     return total
 
@@ -198,6 +228,19 @@ def calcular_total_registro(registro: Tuple[Any, ...]) -> timedelta:
 # ==========================================================
 # ROTAS
 # ==========================================================
+
+@app.before_request
+def garantir_banco():
+    global _db_init_done
+    if _db_init_done:
+        return
+
+    with _db_init_lock:
+        if _db_init_done:
+            return
+        criar_banco()
+        _db_init_done = True
+
 
 @app.route("/", methods=["GET", "POST"])
 def login():
@@ -278,7 +321,7 @@ def dashboard():
 
     cursor.execute(
         sql("""
-            SELECT *
+            SELECT id, user_id, data, entrada_manha, saida_almoco, volta_almoco, saida_final
             FROM registros
             WHERE user_id=?
             ORDER BY data DESC, id DESC
@@ -337,7 +380,8 @@ def bater():
 
     cursor.execute(
         sql("""
-            SELECT * FROM registros
+            SELECT id, entrada_manha, saida_almoco, volta_almoco, saida_final
+            FROM registros
             WHERE user_id=? AND data=?
             ORDER BY id DESC LIMIT 1
         """),
@@ -353,18 +397,21 @@ def bater():
         )
     else:
         id_registro = registro[0]
+        saida_almoco = registro[2]
+        volta_almoco = registro[3]
+        saida_final = registro[4]
 
-        if not registro[4]:
+        if not saida_almoco:
             cursor.execute(
                 sql("UPDATE registros SET saida_almoco=? WHERE id=?"),
                 (hora_atual, id_registro)
             )
-        elif not registro[5]:
+        elif not volta_almoco:
             cursor.execute(
                 sql("UPDATE registros SET volta_almoco=? WHERE id=?"),
                 (hora_atual, id_registro)
             )
-        elif not registro[6]:
+        elif not saida_final:
             cursor.execute(
                 sql("UPDATE registros SET saida_final=? WHERE id=?"),
                 (hora_atual, id_registro)

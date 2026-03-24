@@ -1,6 +1,6 @@
 import pytest
 import os
-from web.app import app, criar_banco
+from web.app import app, criar_banco, parse_hora
 
 @pytest.fixture
 def client():
@@ -151,7 +151,8 @@ def test_dashboard_mostra_historico_de_dias_anteriores(client):
         INSERT INTO registros (user_id, data, entrada_manha, saida_almoco, volta_almoco, saida_final)
         VALUES (?, ?, ?, ?, ?, ?)
         """,
-        (1, ontem, "08:00:00", "12:00:00", "13:00:00", "17:00:00")
+        # Formatos legados (sem segundos) não devem quebrar o histórico.
+        (1, ontem, "08:00", "12:00", "13:00", "17:00")
     )
     conn.commit()
     conn.close()
@@ -161,6 +162,15 @@ def test_dashboard_mostra_historico_de_dias_anteriores(client):
     assert b"Total de hoje" in response.data
     assert b"Total acumulado" in response.data
     assert ontem.encode("utf-8") in response.data
+
+
+def test_parse_hora_aceita_formatos_legados():
+    assert parse_hora(None) is None
+    assert parse_hora("") is None
+
+    assert parse_hora("08:30").strftime("%H:%M:%S") == "08:30:00"
+    assert parse_hora("08:30:15").strftime("%H:%M:%S") == "08:30:15"
+    assert parse_hora("08:30:15.123456").microsecond == 123456
 
 
 def test_criar_banco_migra_registros_legado_sem_colunas_novas():

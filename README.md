@@ -30,7 +30,6 @@ O projeto evoluiu de uma versão CLI para interface gráfica e, posteriormente, 
 ### Histórico
 - Histórico por usuário
 - Total trabalhado por dia
-- Total acumulado
 
 ### Testes Automatizados
 - Testes unitários

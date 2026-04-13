@@ -309,7 +309,7 @@ def register():
 @app.route("/dashboard")
 def dashboard():
     """
-    Exibe histórico de registros e totais (dia atual e acumulado).
+    Exibe histórico de registros e total do dia atual.
     """
     if not usuario_logado():
         return redirect("/")
@@ -334,11 +334,9 @@ def dashboard():
 
     registros = []
     total_hoje = timedelta()
-    total_acumulado = timedelta()
 
     for registro in registros_db:
         total_linha = calcular_total_registro(registro)
-        total_acumulado += total_linha
         if registro[2] == hoje:
             total_hoje += total_linha
 
@@ -355,7 +353,6 @@ def dashboard():
         "dashboard.html",
         registros=registros,
         total_hoje=total_hoje,
-        total_acumulado=total_acumulado,
     )
 
 

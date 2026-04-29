@@ -1,6 +1,7 @@
 /* Basic PWA service worker for Sistema de Ponto */
 
-const CACHE_NAME = "ponto-pwa-v3";
+// Bump this version whenever you want to force-update cached assets.
+const CACHE_NAME = "ponto-v2";
 const PRECACHE_URLS = [
   "/",
   "/manifest.json",
@@ -10,15 +11,21 @@ const PRECACHE_URLS = [
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(PRECACHE_URLS)).then(() => self.skipWaiting())
+    caches
+      .open(CACHE_NAME)
+      .then((cache) => cache.addAll(PRECACHE_URLS))
+      .then(() => self.skipWaiting())
   );
 });
 
 self.addEventListener("activate", (event) => {
   event.waitUntil(
-    caches.keys().then((keys) =>
-      Promise.all(keys.map((k) => (k === CACHE_NAME ? Promise.resolve() : caches.delete(k))))
-    ).then(() => self.clients.claim())
+    caches
+      .keys()
+      .then((keys) =>
+        Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)))
+      )
+      .then(() => self.clients.claim())
   );
 });
 
@@ -37,19 +44,7 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // Static assets: cache-first
-  if (url.pathname.startsWith("/static/")) {
-    event.respondWith(
-      caches.match(request).then((cached) => cached || fetch(request).then((resp) => {
-        const copy = resp.clone();
-        caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
-        return resp;
-      }))
-    );
-    return;
-  }
-
-  // Navigation/pages: network-first with fallback
+  // Pages / navigations: network-first (fallback to cache)
   if (request.mode === "navigate" || request.headers.get("accept")?.includes("text/html")) {
     event.respondWith(
       fetch(request)
@@ -63,6 +58,26 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // Default: try network, fallback to cache
-  event.respondWith(fetch(request).catch(() => caches.match(request)));
+  // Static assets: stale-while-revalidate (fast + updates in background)
+  if (url.pathname.startsWith("/static/") || url.pathname === "/service-worker.js" || url.pathname === "/manifest.json") {
+    event.respondWith(
+      caches.open(CACHE_NAME).then(async (cache) => {
+        const cached = await cache.match(request);
+        const networkPromise = fetch(request)
+          .then((resp) => {
+            if (resp && resp.ok) cache.put(request, resp.clone());
+            return resp;
+          })
+          .catch(() => null);
+
+        return cached || (await networkPromise) || fetch(request);
+      })
+    );
+    return;
+  }
+
+  // Default: cache-first with network fallback
+  event.respondWith(
+    caches.match(request).then((cached) => cached || fetch(request).catch(() => cached))
+  );
 });

@@ -30,6 +30,10 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from openpyxl import Workbook
 from openpyxl.styles import Font
 from openpyxl.utils import get_column_letter
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 
 
 # ==========================================================
@@ -1017,6 +1021,140 @@ def export_excel():
         as_attachment=True,
         download_name="registros_ponto.xlsx",
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+
+@app.route("/export/pdf")
+def export_pdf():
+    """
+    Exporta registros do usuário logado em PDF.
+    """
+    if not usuario_logado():
+        return redirect("/")
+
+    data_inicio_raw = request.args.get("data_inicio")
+    data_fim_raw = request.args.get("data_fim")
+    data_inicio, data_fim, erro_periodo = validar_periodo(data_inicio_raw, data_fim_raw)
+    if erro_periodo:
+        flash(erro_periodo, "danger")
+        qs = ""
+        if data_inicio_raw or data_fim_raw:
+            qs = f"?data_inicio={data_inicio_raw or ''}&data_fim={data_fim_raw or ''}"
+        return redirect("/dashboard" + qs)
+
+    user_id = session["user_id"]
+    perfil = obter_perfil_usuario(user_id)
+    esperado_min = perfil.get("horas_diarias_esperadas_min")
+    if esperado_min is None:
+        esperado_min = 8 * 60
+
+    conn = conectar()
+    cursor = conn.cursor()
+    sql_query, params_extra = aplicar_filtro_periodo_sql(
+        """
+            SELECT id, user_id, data, entrada_manha, saida_almoco, volta_almoco, saida_final
+            FROM registros
+            WHERE user_id=?
+        """,
+        data_inicio,
+        data_fim,
+    )
+    sql_query += "\n            ORDER BY data DESC, id DESC"
+    cursor.execute(sql(sql_query), (user_id,) + params_extra)
+    registros_db = cursor.fetchall()
+    conn.close()
+
+    if data_inicio and data_fim:
+        periodo = f"{datetime.strptime(data_inicio, '%Y-%m-%d').strftime('%d/%m/%Y')} até {datetime.strptime(data_fim, '%Y-%m-%d').strftime('%d/%m/%Y')}"
+    elif data_inicio:
+        periodo = f"a partir de {datetime.strptime(data_inicio, '%Y-%m-%d').strftime('%d/%m/%Y')}"
+    elif data_fim:
+        periodo = f"até {datetime.strptime(data_fim, '%Y-%m-%d').strftime('%d/%m/%Y')}"
+    else:
+        periodo = "todos os registros"
+
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        topMargin=36,
+        bottomMargin=36,
+        leftMargin=36,
+        rightMargin=36,
+        pageCompression=0,
+        title="Relatório de Ponto",
+    )
+
+    styles = getSampleStyleSheet()
+    story = []
+
+    story.append(Paragraph("Relatório de Ponto", styles["Title"]))
+    story.append(Spacer(1, 8))
+
+    nome_funcionario = perfil.get("nome_funcionario") or ""
+    nome_exibicao = perfil.get("nome_exibicao") or ""
+    nome_empresa = perfil.get("nome_empresa") or ""
+
+    story.append(Paragraph(f"<b>Funcionário:</b> {nome_funcionario or 'não informado'}", styles["Normal"]))
+    if nome_exibicao:
+        story.append(Paragraph(f"<b>Nome de exibição:</b> {nome_exibicao}", styles["Normal"]))
+    else:
+        story.append(Paragraph("<b>Nome de exibição:</b> -", styles["Normal"]))
+    story.append(Paragraph(f"<b>Empresa:</b> {nome_empresa or '-'}", styles["Normal"]))
+    story.append(Paragraph(f"<b>Período:</b> {periodo}", styles["Normal"]))
+    story.append(Spacer(1, 12))
+
+    data_table = [
+        ["Data", "Entrada", "Saída Almoço", "Volta Almoço", "Saída Final", "Total Trabalhado", "Saldo do Dia"]
+    ]
+
+    for registro in registros_db:
+        total_linha = calcular_total_registro(registro)
+        saida_final = registro[6]
+        em_aberto = not bool(parse_hora(saida_final))
+        saldo_delta = None if em_aberto else calcular_saldo_dia(total_linha, esperado_min)
+        saldo_str = "em aberto" if em_aberto else (formatar_horas_minutos(saldo_delta) if saldo_delta is not None else "-")
+
+        data_table.append(
+            [
+                registro[2],
+                registro[3] or "",
+                registro[4] or "",
+                registro[5] or "",
+                registro[6] or "",
+                formatar_duracao_sem_sinal(total_linha),
+                saldo_str,
+            ]
+        )
+
+    table = Table(data_table, repeatRows=1)
+    table.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#212529")),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("FONTSIZE", (0, 0), (-1, -1), 9),
+                ("GRID", (0, 0), (-1, -1), 0.25, colors.grey),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.whitesmoke, colors.lightgrey]),
+                ("LEFTPADDING", (0, 0), (-1, -1), 4),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+                ("TOPPADDING", (0, 0), (-1, -1), 3),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ]
+        )
+    )
+
+    story.append(table)
+    doc.build(story)
+
+    buffer.seek(0)
+    return send_file(
+        buffer,
+        as_attachment=True,
+        download_name="registros_ponto.pdf",
+        mimetype="application/pdf",
     )
 
 

@@ -666,6 +666,81 @@ def test_dashboard_valida_periodo_invalido(client):
     assert resp.headers["Location"].startswith("/dashboard")
 
 
+def test_export_pdf_sem_login_falha(client):
+    resp = client.get("/export/pdf", follow_redirects=False)
+    assert resp.status_code == 302
+    assert resp.headers["Location"].endswith("/")
+
+
+def test_export_pdf_retorna_pdf_valido_e_so_do_usuario(client):
+    _criar_usuario_e_logar(client, "u1", "1234")
+
+    conn = sqlite3.connect("web/database.db")
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        INSERT INTO registros (user_id, data, entrada_manha, saida_almoco, volta_almoco, saida_final)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (1, "2026-03-10", "08:00", "12:00", "13:00", "17:00"),
+    )
+    conn.commit()
+    conn.close()
+
+    client.get("/logout")
+    _criar_usuario_e_logar(client, "u2", "1234")
+
+    conn = sqlite3.connect("web/database.db")
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        INSERT INTO registros (user_id, data, entrada_manha, saida_almoco, volta_almoco, saida_final)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (2, "2026-04-11", "08:00", "12:00", "13:00", "18:00"),
+    )
+    conn.commit()
+    conn.close()
+
+    resp = client.get("/export/pdf")
+    assert resp.status_code == 200
+    assert resp.headers["Content-Disposition"].startswith("attachment")
+    assert "registros_ponto.pdf" in resp.headers["Content-Disposition"]
+    assert resp.mimetype == "application/pdf"
+    assert resp.data.startswith(b"%PDF")
+
+    # Como o PDF é gerado sem compressão, o texto deve estar presente.
+    assert b"2026-04-11" in resp.data
+    assert b"2026-03-10" not in resp.data
+
+
+def test_export_pdf_respeita_filtro_periodo(client):
+    _criar_usuario_e_logar(client, "u1", "1234")
+
+    conn = sqlite3.connect("web/database.db")
+    cursor = conn.cursor()
+    cursor.executemany(
+        """
+        INSERT INTO registros (user_id, data, entrada_manha, saida_almoco, volta_almoco, saida_final)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        [
+            (1, "2026-01-01", "08:00", "12:00", "13:00", "17:00"),
+            (1, "2026-02-15", "08:00", "12:00", "13:00", "17:00"),
+        ],
+    )
+    conn.commit()
+    conn.close()
+
+    resp = client.get("/export/pdf?data_inicio=2026-02-01&data_fim=2026-02-28")
+    assert resp.status_code == 200
+    assert resp.data.startswith(b"%PDF")
+    assert b"01/02/2026" in resp.data
+    assert b"28/02/2026" in resp.data
+    assert b"2026-02-15" in resp.data
+    assert b"2026-01-01" not in resp.data
+
+
 def test_deletar_conta_apaga_registros_e_desloga(client):
     _criar_usuario_e_logar(client)
     client.get("/bater")

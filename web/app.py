@@ -22,10 +22,14 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from typing import Optional, Tuple, Any, Dict
 import threading
+from io import BytesIO
 
 import psycopg2
-from flask import Flask, render_template, request, redirect, session, flash, jsonify
+from flask import Flask, render_template, request, redirect, session, flash, jsonify, send_file
 from werkzeug.security import generate_password_hash, check_password_hash
+from openpyxl import Workbook
+from openpyxl.styles import Font
+from openpyxl.utils import get_column_letter
 
 
 # ==========================================================
@@ -438,6 +442,14 @@ def horas_decimal(delta: timedelta) -> float:
     return round(delta.total_seconds() / 3600, 2)
 
 
+def formatar_duracao_sem_sinal(delta: timedelta) -> str:
+    total_min = int(round(delta.total_seconds() / 60))
+    total_min_abs = abs(total_min)
+    horas = total_min_abs // 60
+    minutos = total_min_abs % 60
+    return f"{horas}h {minutos:02d}m"
+
+
 def calcular_total_registro(registro: Tuple[Any, ...]) -> timedelta:
     """
     Calcula o total trabalhado de um registro.
@@ -836,6 +848,95 @@ def logout():
     """
     session.clear()
     return redirect("/")
+
+
+@app.route("/export/excel")
+def export_excel():
+    """
+    Exporta registros do usuário logado em Excel (.xlsx).
+    """
+    if not usuario_logado():
+        return redirect("/")
+
+    user_id = session["user_id"]
+    perfil = obter_perfil_usuario(user_id)
+    esperado_min = perfil.get("horas_diarias_esperadas_min")
+    if esperado_min is None:
+        esperado_min = 8 * 60
+
+    conn = conectar()
+    cursor = conn.cursor()
+    cursor.execute(
+        sql("""
+            SELECT id, user_id, data, entrada_manha, saida_almoco, volta_almoco, saida_final
+            FROM registros
+            WHERE user_id=?
+            ORDER BY data DESC, id DESC
+        """),
+        (user_id,),
+    )
+    registros_db = cursor.fetchall()
+    conn.close()
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Registros"
+
+    headers = [
+        "Data",
+        "Entrada",
+        "Saída Almoço",
+        "Volta Almoço",
+        "Saída Final",
+        "Total Trabalhado",
+        "Saldo do Dia",
+    ]
+    ws.append(headers)
+
+    for cell in ws[1]:
+        cell.font = Font(bold=True)
+
+    for registro in registros_db:
+        total_linha = calcular_total_registro(registro)
+        saida_final = registro[6]
+        em_aberto = not bool(parse_hora(saida_final))
+        saldo_delta = None if em_aberto else calcular_saldo_dia(total_linha, esperado_min)
+        saldo_str = "em aberto" if em_aberto else (formatar_horas_minutos(saldo_delta) if saldo_delta is not None else "-")
+
+        ws.append(
+            [
+                registro[2],
+                registro[3] or "",
+                registro[4] or "",
+                registro[5] or "",
+                registro[6] or "",
+                formatar_duracao_sem_sinal(total_linha),
+                saldo_str,
+            ]
+        )
+
+    ws.freeze_panes = "A2"
+
+    # Ajuste simples de largura das colunas
+    for col_idx, _ in enumerate(headers, start=1):
+        max_len = 0
+        for row in ws.iter_rows(min_col=col_idx, max_col=col_idx, values_only=True):
+            value = row[0]
+            if value is None:
+                continue
+            max_len = max(max_len, len(str(value)))
+        ws.column_dimensions[get_column_letter(col_idx)].width = min(max_len + 2, 40)
+
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+
+    return send_file(
+        output,
+        as_attachment=True,
+        download_name="registros_ponto.xlsx",
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
 
 
 # ==========================================================

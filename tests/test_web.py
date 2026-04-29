@@ -3,6 +3,9 @@ import os
 from web.app import app, criar_banco, parse_hora
 import sqlite3
 from datetime import datetime, timedelta
+from io import BytesIO
+
+import openpyxl
 
 @pytest.fixture
 def client():
@@ -537,6 +540,66 @@ def test_dashboard_graficos_apenas_do_usuario_logado(client):
     # Deve conter apenas a data do usuário logado (u2)
     assert b"2026-02-02" in response.data
     assert b"2026-01-01" not in response.data
+
+
+def test_export_excel_sem_login_falha(client):
+    resp = client.get("/export/excel", follow_redirects=False)
+    assert resp.status_code == 302
+    assert resp.headers["Location"].endswith("/")
+
+
+def test_export_excel_retorna_arquivo_valido_e_so_do_usuario(client):
+    _criar_usuario_e_logar(client, "u1", "1234")
+
+    conn = sqlite3.connect("web/database.db")
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        INSERT INTO registros (user_id, data, entrada_manha, saida_almoco, volta_almoco, saida_final)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (1, "2026-03-10", "08:00", "12:00", "13:00", "17:00"),
+    )
+    conn.commit()
+    conn.close()
+
+    client.get("/logout")
+    _criar_usuario_e_logar(client, "u2", "1234")
+
+    conn = sqlite3.connect("web/database.db")
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        INSERT INTO registros (user_id, data, entrada_manha, saida_almoco, volta_almoco, saida_final)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (2, "2026-04-11", "08:00", "12:00", "13:00", "18:00"),
+    )
+    conn.commit()
+    conn.close()
+
+    resp = client.get("/export/excel")
+    assert resp.status_code == 200
+    assert resp.headers["Content-Disposition"].startswith("attachment")
+    assert "registros_ponto.xlsx" in resp.headers["Content-Disposition"]
+
+    wb = openpyxl.load_workbook(BytesIO(resp.data))
+    ws = wb.active
+    rows = list(ws.iter_rows(values_only=True))
+    assert rows[0] == (
+        "Data",
+        "Entrada",
+        "Saída Almoço",
+        "Volta Almoço",
+        "Saída Final",
+        "Total Trabalhado",
+        "Saldo do Dia",
+    )
+
+    # Deve conter apenas registro do u2
+    valores = "\n".join(str(c) for r in rows[1:] for c in r if c is not None)
+    assert "2026-04-11" in valores
+    assert "2026-03-10" not in valores
 
 
 def test_deletar_conta_apaga_registros_e_desloga(client):

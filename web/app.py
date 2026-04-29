@@ -20,11 +20,11 @@ import sqlite3
 from urllib.parse import urlparse
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
-from typing import Optional, Tuple, Any
+from typing import Optional, Tuple, Any, Dict
 import threading
 
 import psycopg2
-from flask import Flask, render_template, request, redirect, session
+from flask import Flask, render_template, request, redirect, session, flash
 from werkzeug.security import generate_password_hash, check_password_hash
 
 
@@ -100,7 +100,10 @@ def criar_banco() -> None:
             CREATE TABLE IF NOT EXISTS usuarios (
                 id SERIAL PRIMARY KEY,
                 username TEXT UNIQUE NOT NULL,
-                password TEXT NOT NULL
+                password TEXT NOT NULL,
+                nome_funcionario TEXT,
+                nome_empresa TEXT,
+                horas_diarias_esperadas_min INTEGER
             )
         """)
         cursor.execute("""
@@ -118,12 +121,20 @@ def criar_banco() -> None:
         # Migração: adiciona colunas ausentes em bases antigas
         for coluna in ("entrada_manha", "saida_almoco", "volta_almoco", "saida_final"):
             cursor.execute(f"ALTER TABLE registros ADD COLUMN IF NOT EXISTS {coluna} TEXT")
+
+        # Migração: adiciona colunas do perfil em bases antigas
+        cursor.execute("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS nome_funcionario TEXT")
+        cursor.execute("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS nome_empresa TEXT")
+        cursor.execute("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS horas_diarias_esperadas_min INTEGER")
     else:
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS usuarios (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 username TEXT UNIQUE NOT NULL,
-                password TEXT NOT NULL
+                password TEXT NOT NULL,
+                nome_funcionario TEXT,
+                nome_empresa TEXT,
+                horas_diarias_esperadas_min INTEGER
             )
         """)
         cursor.execute("""
@@ -149,6 +160,21 @@ def criar_banco() -> None:
                 except sqlite3.OperationalError as e:
                     # Se dois processos tentarem migrar ao mesmo tempo, o segundo pode
                     # receber "duplicate column name". Nesse caso, basta ignorar.
+                    if "duplicate column name" not in str(e).lower():
+                        raise
+
+        # Migração: adiciona colunas do perfil em bases antigas (SQLite)
+        cursor.execute("PRAGMA table_info(usuarios)")
+        colunas_usuarios = {row[1] for row in cursor.fetchall()}
+        for coluna, tipo in (
+            ("nome_funcionario", "TEXT"),
+            ("nome_empresa", "TEXT"),
+            ("horas_diarias_esperadas_min", "INTEGER"),
+        ):
+            if coluna not in colunas_usuarios:
+                try:
+                    cursor.execute(f"ALTER TABLE usuarios ADD COLUMN {coluna} {tipo}")
+                except sqlite3.OperationalError as e:
                     if "duplicate column name" not in str(e).lower():
                         raise
 
@@ -193,6 +219,77 @@ def usuario_logado() -> bool:
     Verifica se existe usuário autenticado na sessão.
     """
     return "user_id" in session
+
+
+def obter_perfil_usuario(user_id: int) -> Dict[str, Any]:
+    conn = conectar()
+    cursor = conn.cursor()
+    cursor.execute(
+        sql("""
+            SELECT nome_funcionario, nome_empresa, horas_diarias_esperadas_min
+            FROM usuarios
+            WHERE id=?
+        """),
+        (user_id,),
+    )
+    row = cursor.fetchone()
+    conn.close()
+
+    if not row:
+        return {"nome_funcionario": None, "nome_empresa": None, "horas_diarias_esperadas_min": None}
+
+    return {"nome_funcionario": row[0], "nome_empresa": row[1], "horas_diarias_esperadas_min": row[2]}
+
+
+def parse_horas_esperadas_min(valor: Optional[str]) -> Optional[int]:
+    """
+    Aceita entrada do perfil como:
+    - "8" ou "8.5" (horas)
+    - "08:00" ou "8:30" (HH:MM)
+    Retorna minutos (int) ou None.
+    """
+    if valor is None:
+        return None
+
+    texto = valor.strip()
+    if not texto:
+        return None
+
+    if ":" in texto:
+        partes = texto.split(":")
+        if len(partes) != 2:
+            return None
+        try:
+            horas = int(partes[0])
+            minutos = int(partes[1])
+        except ValueError:
+            return None
+        if horas < 0 or minutos < 0 or minutos >= 60:
+            return None
+        return horas * 60 + minutos
+
+    try:
+        horas_float = float(texto.replace(",", "."))
+    except ValueError:
+        return None
+    if horas_float < 0:
+        return None
+    return int(round(horas_float * 60))
+
+
+def formatar_horas_minutos(delta: timedelta) -> str:
+    total_min = int(round(delta.total_seconds() / 60))
+    sinal = "+" if total_min >= 0 else "-"
+    total_min_abs = abs(total_min)
+    horas = total_min_abs // 60
+    minutos = total_min_abs % 60
+    return f"{sinal}{horas}h {minutos:02d}m"
+
+
+def calcular_saldo_dia(total_trabalhado: timedelta, esperado_min: Optional[int]) -> Optional[timedelta]:
+    if esperado_min is None:
+        return None
+    return total_trabalhado - timedelta(minutes=int(esperado_min))
 
 
 def calcular_total_registro(registro: Tuple[Any, ...]) -> timedelta:
@@ -319,6 +416,11 @@ def dashboard():
     conn = conectar()
     cursor = conn.cursor()
 
+    perfil = obter_perfil_usuario(session["user_id"])
+    esperado_min = perfil.get("horas_diarias_esperadas_min")
+    if esperado_min is None:
+        esperado_min = 8 * 60
+
     cursor.execute(
         sql("""
             SELECT id, user_id, data, entrada_manha, saida_almoco, volta_almoco, saida_final
@@ -340,20 +442,119 @@ def dashboard():
         if registro[2] == hoje:
             total_hoje += total_linha
 
+        saida_final = registro[6]
+        em_aberto = not bool(parse_hora(saida_final))
+        saldo_delta = None if em_aberto else calcular_saldo_dia(total_linha, esperado_min)
+        saldo_str = "em aberto" if em_aberto else (formatar_horas_minutos(saldo_delta) if saldo_delta is not None else "-")
+
         registros.append({
+            "id": registro[0],
             "data": registro[2],
             "entrada": registro[3],
             "saida_almoco": registro[4],
             "volta_almoco": registro[5],
             "saida_final": registro[6],
-            "total": total_linha
+            "total": total_linha,
+            "esperado": timedelta(minutes=int(esperado_min)) if esperado_min is not None else None,
+            "saldo": saldo_str,
         })
 
     return render_template(
         "dashboard.html",
         registros=registros,
         total_hoje=total_hoje,
+        esperado_diario=timedelta(minutes=int(esperado_min)) if esperado_min is not None else None,
     )
+
+
+@app.route("/perfil", methods=["GET", "POST"])
+def perfil():
+    if not usuario_logado():
+        return redirect("/")
+
+    if request.method == "POST":
+        nome_funcionario = (request.form.get("nome_funcionario") or "").strip() or None
+        nome_empresa = (request.form.get("nome_empresa") or "").strip() or None
+        horas_texto = request.form.get("horas_diarias_esperadas") or ""
+
+        horas_min = parse_horas_esperadas_min(horas_texto)
+        if horas_texto.strip() and horas_min is None:
+            flash("Formato inválido em horas diárias esperadas. Use 8, 8.5 ou 08:00.", "danger")
+            return redirect("/perfil")
+
+        conn = conectar()
+        cursor = conn.cursor()
+        cursor.execute(
+            sql("""
+                UPDATE usuarios
+                SET nome_funcionario=?, nome_empresa=?, horas_diarias_esperadas_min=?
+                WHERE id=?
+            """),
+            (nome_funcionario, nome_empresa, horas_min, session["user_id"]),
+        )
+        conn.commit()
+        conn.close()
+
+        flash("Perfil salvo com sucesso.", "success")
+        return redirect("/perfil")
+
+    perfil_atual = obter_perfil_usuario(session["user_id"])
+    horas_min = perfil_atual.get("horas_diarias_esperadas_min")
+    horas_str = ""
+    if horas_min is not None:
+        horas_str = f"{int(horas_min // 60)}:{int(horas_min % 60):02d}"
+
+    return render_template(
+        "perfil.html",
+        perfil=perfil_atual,
+        horas_diarias_esperadas=horas_str,
+    )
+
+
+@app.route("/registros/<int:registro_id>/excluir", methods=["POST"])
+def excluir_registro(registro_id: int):
+    if not usuario_logado():
+        return redirect("/")
+
+    conn = conectar()
+    cursor = conn.cursor()
+    cursor.execute(
+        sql("DELETE FROM registros WHERE id=? AND user_id=?"),
+        (registro_id, session["user_id"]),
+    )
+    apagados = cursor.rowcount
+    conn.commit()
+    conn.close()
+
+    if apagados:
+        flash("Registro excluído com sucesso.", "success")
+    else:
+        flash("Registro não encontrado.", "danger")
+
+    return redirect("/dashboard")
+
+
+@app.route("/perfil/excluir-conta", methods=["POST"])
+def excluir_conta():
+    if not usuario_logado():
+        return redirect("/")
+
+    confirmacao = (request.form.get("confirmacao") or "").strip()
+    if confirmacao != "EXCLUIR":
+        flash("Confirmação inválida. Digite EXCLUIR para apagar sua conta.", "danger")
+        return redirect("/perfil")
+
+    user_id = session["user_id"]
+    conn = conectar()
+    cursor = conn.cursor()
+    cursor.execute(sql("DELETE FROM registros WHERE user_id=?"), (user_id,))
+    cursor.execute(sql("DELETE FROM usuarios WHERE id=?"), (user_id,))
+    conn.commit()
+    conn.close()
+
+    session.clear()
+    flash("Conta excluída com sucesso.", "success")
+    return redirect("/")
 
 
 @app.route("/bater")

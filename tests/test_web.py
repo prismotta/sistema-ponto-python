@@ -1,6 +1,8 @@
 import pytest
 import os
 from web.app import app, criar_banco, parse_hora
+import sqlite3
+from datetime import datetime, timedelta
 
 @pytest.fixture
 def client():
@@ -223,4 +225,147 @@ def test_criar_banco_migra_registros_legado_sem_colunas_novas():
 
         response = client.get("/dashboard")
         assert response.status_code == 200
+
+
+def _criar_usuario_e_logar(client, username: str = "teste", password: str = "1234"):
+    client.post("/register", data={"username": username, "password": password})
+    client.post("/", data={"username": username, "password": password})
+
+
+def test_salvar_perfil(client):
+    _criar_usuario_e_logar(client)
+
+    response = client.post(
+        "/perfil",
+        data={
+            "nome_funcionario": "João da Silva",
+            "nome_empresa": "Empresa X",
+            "horas_diarias_esperadas": "08:30",
+        },
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+
+    conn = sqlite3.connect("web/database.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT nome_funcionario, nome_empresa, horas_diarias_esperadas_min FROM usuarios WHERE id=1")
+    row = cursor.fetchone()
+    conn.close()
+
+    assert row == ("João da Silva", "Empresa X", 8 * 60 + 30)
+
+
+def test_deletar_registro_so_afeta_usuario_logado(client):
+    _criar_usuario_e_logar(client, "u1", "1234")
+    client.get("/bater")
+
+    conn = sqlite3.connect("web/database.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT id FROM registros WHERE user_id=1")
+    registro_id = cursor.fetchone()[0]
+    conn.close()
+
+    client.get("/logout")
+    _criar_usuario_e_logar(client, "u2", "1234")
+
+    # Tentativa de excluir registro de outro usuário não deve apagar nada
+    client.post(f"/registros/{registro_id}/excluir", follow_redirects=True)
+
+    conn = sqlite3.connect("web/database.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*) FROM registros WHERE id=?", (registro_id,))
+    count = cursor.fetchone()[0]
+    conn.close()
+    assert count == 1
+
+
+def test_deletar_registro_do_proprio_usuario(client):
+    _criar_usuario_e_logar(client, "u1", "1234")
+    client.get("/bater")
+
+    conn = sqlite3.connect("web/database.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT id FROM registros WHERE user_id=1")
+    registro_id = cursor.fetchone()[0]
+    conn.close()
+
+    client.post(f"/registros/{registro_id}/excluir", follow_redirects=True)
+
+    conn = sqlite3.connect("web/database.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*) FROM registros WHERE id=?", (registro_id,))
+    count = cursor.fetchone()[0]
+    conn.close()
+    assert count == 0
+
+
+def test_calcular_saldo_extra_faltante_e_em_aberto(client):
+    _criar_usuario_e_logar(client)
+
+    # Define esperado: 8h
+    client.post("/perfil", data={"horas_diarias_esperadas": "8"}, follow_redirects=True)
+
+    hoje = datetime.now().strftime("%Y-%m-%d")
+    ontem = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+
+    conn = sqlite3.connect("web/database.db")
+    cursor = conn.cursor()
+    # Ontem: 9h trabalhadas -> +1h
+    cursor.execute(
+        """
+        INSERT INTO registros (user_id, data, entrada_manha, saida_almoco, volta_almoco, saida_final)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (1, ontem, "08:00", "12:00", "13:00", "18:00"),
+    )
+    # Dois dias atrás: 7h trabalhadas -> -1h
+    anteontem = (datetime.now() - timedelta(days=2)).strftime("%Y-%m-%d")
+    cursor.execute(
+        """
+        INSERT INTO registros (user_id, data, entrada_manha, saida_almoco, volta_almoco, saida_final)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (1, anteontem, "08:00", "12:00", "13:00", "16:00"),
+    )
+    # Hoje: sem saída final -> em aberto
+    cursor.execute(
+        """
+        INSERT INTO registros (user_id, data, entrada_manha)
+        VALUES (?, ?, ?)
+        """,
+        (1, hoje, "08:00"),
+    )
+    conn.commit()
+    conn.close()
+
+    response = client.get("/dashboard")
+    assert response.status_code == 200
+    assert b"+1h 00m" in response.data
+    assert b"-1h 00m" in response.data
+    assert b"em aberto" in response.data
+
+
+def test_deletar_conta_apaga_registros_e_desloga(client):
+    _criar_usuario_e_logar(client)
+    client.get("/bater")
+
+    response = client.post("/perfil/excluir-conta", data={"confirmacao": "EXCLUIR"}, follow_redirects=False)
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/")
+
+    # Acessar dashboard deve redirecionar (sessão encerrada)
+    response_dashboard = client.get("/dashboard", follow_redirects=False)
+    assert response_dashboard.status_code == 302
+    assert response_dashboard.headers["Location"].endswith("/")
+
+    conn = sqlite3.connect("web/database.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*) FROM usuarios")
+    usuarios = cursor.fetchone()[0]
+    cursor.execute("SELECT COUNT(*) FROM registros")
+    registros = cursor.fetchone()[0]
+    conn.close()
+
+    assert usuarios == 0
+    assert registros == 0
 

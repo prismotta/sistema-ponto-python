@@ -991,6 +991,51 @@ def test_tabela_saldo_recebe_classe_por_sinal(client):
     assert b"class=\"text-secondary\">+0h 00m" in resp.data
 
 
+def test_resumo_mensal_sem_registros_no_mes(client):
+    _criar_usuario_e_logar(client, "u1", "1234")
+    resp = client.get("/dashboard")
+    assert resp.status_code == 200
+    assert "Resumo do mês".encode("utf-8") in resp.data
+    assert b"Dias trabalhados" in resp.data
+    assert b">0<" in resp.data  # dias
+
+
+def test_resumo_mensal_calculos_com_multiplos_dias(client):
+    _criar_usuario_e_logar(client, "u1", "1234")
+
+    from datetime import date
+
+    hoje = date.today()
+    mes_inicio = hoje.replace(day=1).isoformat()
+    dia2 = hoje.replace(day=min(2, 28)).isoformat()
+
+    conn = sqlite3.connect("web/database.db")
+    cursor = conn.cursor()
+    cursor.executemany(
+        """
+        INSERT INTO registros (user_id, data, entrada_manha, saida_almoco, volta_almoco, saida_final)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        [
+            # 9h -> 9h 00m
+            (1, mes_inicio, "08:00", "12:00", "13:00", "18:00"),
+            # 7h -> 7h 00m
+            (1, dia2, "08:00", "12:00", "13:00", "16:00"),
+        ],
+    )
+    conn.commit()
+    conn.close()
+
+    resp = client.get("/dashboard")
+    assert resp.status_code == 200
+    # Dias trabalhados: 2
+    assert b">2<" in resp.data
+    # Total: 16h 00m
+    assert "16h 00m".encode("utf-8") in resp.data
+    # Média: 8h 00m
+    assert "8h 00m".encode("utf-8") in resp.data
+
+
 def test_botao_ponto_sem_registro_hoje_mostra_registrar_entrada(client):
     _criar_usuario_e_logar(client, "u1", "1234")
     resp = client.get("/dashboard")

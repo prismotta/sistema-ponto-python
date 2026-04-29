@@ -476,6 +476,13 @@ def limites_mes_atual_iso() -> Tuple[str, str]:
     return primeiro.isoformat(), ultimo.isoformat()
 
 
+def formatar_media_diaria(total: timedelta, dias: int) -> str:
+    if dias <= 0:
+        return "0h 00m"
+    media_seg = total.total_seconds() / dias
+    return formatar_duracao_sem_sinal(timedelta(seconds=media_seg))
+
+
 def calcular_saldo_dia(total_trabalhado: timedelta, esperado_min: Optional[int]) -> Optional[timedelta]:
     if esperado_min is None:
         return None
@@ -718,6 +725,8 @@ def dashboard():
     registros_mes = cursor_mes.fetchall()
     conn_mes.close()
     banco_mes = timedelta()
+    total_mes_finalizado = timedelta()
+    dias_trabalhados_set: set[str] = set()
     for registro_mes in registros_mes:
         total_mes = calcular_total_registro(registro_mes)
         em_aberto_mes = not bool(parse_hora(registro_mes[6]))
@@ -726,6 +735,11 @@ def dashboard():
         saldo_mes = calcular_saldo_dia(total_mes, esperado_min)
         if saldo_mes is not None:
             banco_mes += saldo_mes
+        total_mes_finalizado += total_mes
+        dias_trabalhados_set.add(registro_mes[2])
+
+    dias_trabalhados_mes = len(dias_trabalhados_set)
+    media_diaria_mes = formatar_media_diaria(total_mes_finalizado, dias_trabalhados_mes)
 
     for registro in registros_db:
         total_linha = calcular_total_registro(registro)
@@ -822,6 +836,12 @@ def dashboard():
         data_fim=data_fim or "",
         banco_periodo=formatar_horas_minutos(banco_periodo),
         banco_mes_atual=formatar_banco_horas(banco_mes),
+        resumo_mes={
+            "dias_trabalhados": dias_trabalhados_mes,
+            "total_horas": formatar_duracao_sem_sinal(total_mes_finalizado),
+            "media_diaria": media_diaria_mes,
+            "banco_horas": formatar_banco_horas(banco_mes),
+        },
         status_dia_texto=status_texto,
         status_dia_classe=status_classe,
         total_hoje_status=total_hoje_str,

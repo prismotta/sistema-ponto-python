@@ -161,7 +161,7 @@ def test_dashboard_mostra_historico_de_dias_anteriores(client):
 
     response = client.get("/dashboard")
     assert response.status_code == 200
-    assert b"Total de hoje" in response.data
+    assert b"Saldo do Dia" in response.data
     assert ontem.encode("utf-8") in response.data
 
 

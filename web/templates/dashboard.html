@@ -39,10 +39,6 @@
 
     <div class="card shadow-sm">
         <div class="card-body">
-            <h5 class="card-title">Resumo</h5>
-            <p><strong>Total de hoje:</strong> {{ total_hoje }}</p>
-            <p><strong>Horas esperadas por dia:</strong> {{ esperado_diario }}</p>
-
             <div class="table-responsive">
                 <table class="table table-striped table-bordered">
                     <thead class="table-dark">
@@ -53,9 +49,8 @@
                             <th>Volta Almoço</th>
                             <th>Saída Final</th>
                             <th>Total Trabalhado</th>
-                            <th>Horas Esperadas</th>
                             <th>Saldo do Dia</th>
-                            <th>AÃ§Ãµes</th>
+                            <th>Ações</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -67,7 +62,6 @@
                             <td>{{ r.volta_almoco if r.volta_almoco else "-" }}</td>
                             <td>{{ r.saida_final if r.saida_final else "-" }}</td>
                             <td>{{ r.total }}</td>
-                            <td>{{ r.esperado }}</td>
                             <td>{{ r.saldo }}</td>
                             <td class="text-center">
                                 <form method="POST" action="/registros/{{ r.id }}/excluir" onsubmit="return confirm('Tem certeza que deseja excluir este registro?');" style="display:inline;">
@@ -79,13 +73,12 @@
                     </tbody>
                 </table>
             </div>
-
         </div>
     </div>
 
-</div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
+

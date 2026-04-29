@@ -15,12 +15,11 @@
                 <div class="card-body">
 
                     <h3 class="text-center mb-4">Criar Conta</h3>
-                        {% if erro %}
-                            <div class="alert alert-danger">
-                                {{ erro }}
-                            </div>
-                                {% endif %}
-
+                    {% if erro %}
+                        <div class="alert alert-danger">
+                            {{ erro }}
+                        </div>
+                    {% endif %}
 
                     <form method="POST">
 
@@ -56,3 +55,4 @@
 
 </body>
 </html>
+

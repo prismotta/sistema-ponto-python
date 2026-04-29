@@ -26,7 +26,20 @@ self.addEventListener("activate", (event) => {
         Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)))
       )
       .then(() => self.clients.claim())
+      .then(async () => {
+        const clients = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+        for (const client of clients) {
+          client.postMessage({ type: "SW_ACTIVATED", version: CACHE_NAME });
+        }
+      })
   );
+});
+
+self.addEventListener("message", (event) => {
+  const data = event.data || {};
+  if (data && data.type === "SKIP_WAITING") {
+    self.skipWaiting();
+  }
 });
 
 self.addEventListener("fetch", (event) => {

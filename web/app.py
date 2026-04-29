@@ -452,6 +452,27 @@ def formatar_horas_minutos(delta: timedelta) -> str:
     return f"{sinal}{horas}h {minutos:02d}m"
 
 
+def formatar_banco_horas(delta: timedelta) -> str:
+    if int(delta.total_seconds()) == 0:
+        return "0h 00m"
+    return formatar_horas_minutos(delta)
+
+
+def limites_mes_atual_iso() -> Tuple[str, str]:
+    """
+    Retorna (primeiro_dia, ultimo_dia) do mês atual em formato ISO YYYY-MM-DD,
+    baseado no timezone configurado pela função `agora()`.
+    """
+    hoje_local = agora().date()
+    primeiro = hoje_local.replace(day=1)
+    if primeiro.month == 12:
+        proximo = primeiro.replace(year=primeiro.year + 1, month=1, day=1)
+    else:
+        proximo = primeiro.replace(month=primeiro.month + 1, day=1)
+    ultimo = proximo - timedelta(days=1)
+    return primeiro.isoformat(), ultimo.isoformat()
+
+
 def calcular_saldo_dia(total_trabalhado: timedelta, esperado_min: Optional[int]) -> Optional[timedelta]:
     if esperado_min is None:
         return None
@@ -679,6 +700,30 @@ def dashboard():
     graf_saldo: list[float] = []
     banco_periodo = timedelta()
 
+    mes_inicio, mes_fim = limites_mes_atual_iso()
+    conn_mes = conectar()
+    cursor_mes = conn_mes.cursor()
+    cursor_mes.execute(
+        sql("""
+            SELECT id, user_id, data, entrada_manha, saida_almoco, volta_almoco, saida_final
+            FROM registros
+            WHERE user_id=? AND data BETWEEN ? AND ?
+            ORDER BY data DESC, id DESC
+        """),
+        (session["user_id"], mes_inicio, mes_fim),
+    )
+    registros_mes = cursor_mes.fetchall()
+    conn_mes.close()
+    banco_mes = timedelta()
+    for registro_mes in registros_mes:
+        total_mes = calcular_total_registro(registro_mes)
+        em_aberto_mes = not bool(parse_hora(registro_mes[6]))
+        if em_aberto_mes:
+            continue
+        saldo_mes = calcular_saldo_dia(total_mes, esperado_min)
+        if saldo_mes is not None:
+            banco_mes += saldo_mes
+
     for registro in registros_db:
         total_linha = calcular_total_registro(registro)
         if registro[2] == hoje:
@@ -717,6 +762,7 @@ def dashboard():
         data_inicio=data_inicio or "",
         data_fim=data_fim or "",
         banco_periodo=formatar_horas_minutos(banco_periodo),
+        banco_mes_atual=formatar_banco_horas(banco_mes),
     )
 
 

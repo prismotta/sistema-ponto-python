@@ -800,6 +800,55 @@ def test_dashboard_mostra_botao_este_mes_e_banco_de_horas(client):
     assert b"Este m\xc3\xaas" in resp.data
     assert "Banco de horas do período:".encode("utf-8") in resp.data
     assert b"+0h 00m" in resp.data
+    assert "Banco de horas do mês atual:".encode("utf-8") in resp.data
+
+
+def test_dashboard_banco_mes_atual_considera_apenas_mes_corrente_e_finalizados(client):
+    _criar_usuario_e_logar(client, "u1", "1234")
+
+    from datetime import date
+
+    hoje = date.today()
+    mes_inicio = hoje.replace(day=1)
+    dia_mes = mes_inicio.replace(day=min(2, 28))
+    # dia fora do mês (mês anterior)
+    if mes_inicio.month == 1:
+        fora_mes = mes_inicio.replace(year=mes_inicio.year - 1, month=12, day=28)
+    else:
+        fora_mes = mes_inicio.replace(month=mes_inicio.month - 1, day=28)
+
+    conn = sqlite3.connect("web/database.db")
+    cursor = conn.cursor()
+    # Dentro do mês: +1h
+    cursor.execute(
+        """
+        INSERT INTO registros (user_id, data, entrada_manha, saida_almoco, volta_almoco, saida_final)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (1, dia_mes.isoformat(), "08:00", "12:00", "13:00", "18:00"),
+    )
+    # Dentro do mês: em aberto (não conta)
+    cursor.execute(
+        """
+        INSERT INTO registros (user_id, data, entrada_manha)
+        VALUES (?, ?, ?)
+        """,
+        (1, mes_inicio.isoformat(), "08:00"),
+    )
+    # Fora do mês: +2h (não conta)
+    cursor.execute(
+        """
+        INSERT INTO registros (user_id, data, entrada_manha, saida_almoco, volta_almoco, saida_final)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (1, fora_mes.isoformat(), "08:00", "12:00", "13:00", "19:00"),
+    )
+    conn.commit()
+    conn.close()
+
+    resp = client.get("/dashboard")
+    assert resp.status_code == 200
+    assert "Banco de horas do mês atual: +1h 00m".encode("utf-8") in resp.data
 
 
 def test_404_amigavel_mostra_botao_voltar(client):

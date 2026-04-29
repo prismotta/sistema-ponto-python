@@ -590,7 +590,6 @@ def dashboard():
     registros = []
     total_hoje = timedelta()
     graf_labels: list[str] = []
-    graf_horas: list[float] = []
     graf_saldo: list[float] = []
 
     for registro in registros_db:
@@ -605,7 +604,6 @@ def dashboard():
 
         if not em_aberto:
             graf_labels.append(registro[2])
-            graf_horas.append(horas_decimal(total_linha))
             graf_saldo.append(horas_decimal(saldo_delta or timedelta()))
 
         registros.append({
@@ -626,7 +624,6 @@ def dashboard():
         total_hoje=total_hoje,
         nome_funcionario=nome_dashboard,
         graf_labels=graf_labels,
-        graf_horas=graf_horas,
         graf_saldo=graf_saldo,
     )
 

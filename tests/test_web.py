@@ -497,7 +497,7 @@ def test_dashboard_sem_registros_mostra_mensagem_graficos(client):
     _criar_usuario_e_logar(client)
     response = client.get("/dashboard")
     assert response.status_code == 200
-    assert "Ainda não há dados suficientes para gerar gráficos.".encode("utf-8") in response.data
+    assert "Ainda não há dados suficientes para gerar o gráfico.".encode("utf-8") in response.data
 
 
 def test_dashboard_graficos_apenas_do_usuario_logado(client):

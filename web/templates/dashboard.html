@@ -35,34 +35,36 @@
         <a href="/bater" class="btn btn-primary">Registrar Ponto</a>
     </div>
 
-    {% if graf_labels and graf_horas and graf_saldo %}
-    <div class="row g-3 mb-4">
-        <div class="col-12 col-lg-6">
-            <div class="card shadow-sm">
-                <div class="card-body">
-                    <h6 class="card-title mb-3">Horas trabalhadas por dia</h6>
-                    <div style="height: 280px;">
-                        <canvas id="grafHoras"></canvas>
-                    </div>
-                </div>
+    <div class="card shadow-sm mb-4">
+        <div class="card-body">
+            <div class="d-flex justify-content-between align-items-center">
+                <h6 class="card-title mb-0">Horas extras / faltantes</h6>
+                <button
+                    class="btn btn-outline-secondary btn-sm"
+                    type="button"
+                    data-bs-toggle="collapse"
+                    data-bs-target="#secaoGrafico"
+                    aria-expanded="false"
+                    aria-controls="secaoGrafico"
+                    id="btnGrafico"
+                >
+                    Mostrar gráfico
+                </button>
             </div>
-        </div>
-        <div class="col-12 col-lg-6">
-            <div class="card shadow-sm">
-                <div class="card-body">
-                    <h6 class="card-title mb-3">Saldo do dia (extra/faltante)</h6>
-                    <div style="height: 280px;">
-                        <canvas id="grafSaldo"></canvas>
-                    </div>
+
+            <div class="collapse mt-3" id="secaoGrafico">
+                {% if graf_labels and graf_saldo %}
+                <div style="height: 320px;">
+                    <canvas id="grafSaldoUnico"></canvas>
                 </div>
+                {% else %}
+                <div class="alert alert-secondary mb-0">
+                    Ainda não há dados suficientes para gerar o gráfico.
+                </div>
+                {% endif %}
             </div>
         </div>
     </div>
-    {% else %}
-    <div class="alert alert-secondary mb-4">
-        Ainda não há dados suficientes para gerar gráficos.
-    </div>
-    {% endif %}
 
     <div class="card shadow-sm">
         <div class="card-body">
@@ -109,49 +111,55 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
 <script>
   const labels = {{ graf_labels | tojson }};
-  const horas = {{ graf_horas | tojson }};
   const saldo = {{ graf_saldo | tojson }};
 
+  const btnGrafico = document.getElementById('btnGrafico');
+  const secaoGrafico = document.getElementById('secaoGrafico');
+
+  if (secaoGrafico) {
+    secaoGrafico.addEventListener('shown.bs.collapse', () => {
+      if (btnGrafico) btnGrafico.textContent = 'Ocultar gráfico';
+    });
+    secaoGrafico.addEventListener('hidden.bs.collapse', () => {
+      if (btnGrafico) btnGrafico.textContent = 'Mostrar gráfico';
+    });
+  }
+
   if (labels && labels.length) {
-    new Chart(document.getElementById('grafHoras'), {
+    const extra = saldo.map(v => (v > 0 ? v : 0));
+    const faltante = saldo.map(v => (v < 0 ? v : 0));
+
+    new Chart(document.getElementById('grafSaldoUnico'), {
       type: 'bar',
       data: {
         labels,
-        datasets: [{
-          label: 'Horas trabalhadas',
-          data: horas,
-          backgroundColor: 'rgba(13, 110, 253, 0.35)',
-          borderColor: 'rgba(13, 110, 253, 1)',
-          borderWidth: 1,
-        }]
+        datasets: [
+          {
+            label: 'Extra',
+            data: extra,
+            backgroundColor: 'rgba(25, 135, 84, 0.55)',
+            borderColor: 'rgba(25, 135, 84, 1)',
+            borderWidth: 1
+          },
+          {
+            label: 'Faltante',
+            data: faltante,
+            backgroundColor: 'rgba(220, 53, 69, 0.55)',
+            borderColor: 'rgba(220, 53, 69, 1)',
+            borderWidth: 1
+          }
+        ]
       },
       options: {
         responsive: true,
         maintainAspectRatio: false,
+        plugins: {
+          legend: { display: true }
+        },
         scales: {
-          y: { beginAtZero: true, title: { display: true, text: 'Horas' } }
-        }
-      }
-    });
-
-    new Chart(document.getElementById('grafSaldo'), {
-      type: 'line',
-      data: {
-        labels,
-        datasets: [{
-          label: 'Saldo (h)',
-          data: saldo,
-          tension: 0.25,
-          borderColor: 'rgba(25, 135, 84, 1)',
-          backgroundColor: 'rgba(25, 135, 84, 0.15)',
-          fill: true,
-        }]
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        scales: {
-          y: { title: { display: true, text: 'Horas' } }
+          y: {
+            title: { display: true, text: 'Saldo (h)' }
+          }
         }
       }
     });

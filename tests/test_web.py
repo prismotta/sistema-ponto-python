@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from io import BytesIO
 
 import openpyxl
+import json
 
 @pytest.fixture
 def client():
@@ -402,6 +403,20 @@ def test_api_sem_login_deve_falhar(client):
     assert resp.status_code == 401
     assert resp.is_json
     assert resp.json["success"] is False
+
+
+def test_pwa_manifest_e_service_worker_sao_servidos(client):
+    resp_manifest = client.get("/manifest.json")
+    assert resp_manifest.status_code == 200
+    assert resp_manifest.is_json
+    data = resp_manifest.get_json()
+    assert data["name"] == "Sistema de Ponto"
+    assert data["short_name"] == "Ponto"
+    assert data["start_url"] == "/"
+
+    resp_sw = client.get("/service-worker.js")
+    assert resp_sw.status_code == 200
+    assert b"service worker" in resp_sw.data.lower() or b"addEventListener" in resp_sw.data
 
 
 def test_api_get_profile_logado(client):

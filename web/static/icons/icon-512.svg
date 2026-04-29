@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="96" fill="#212529"/>
+  <circle cx="256" cy="240" r="160" fill="#f8f9fa"/>
+  <circle cx="256" cy="240" r="146" fill="#ffffff"/>
+  <line x1="256" y1="240" x2="256" y2="150" stroke="#212529" stroke-width="28" stroke-linecap="round"/>
+  <line x1="256" y1="240" x2="340" y2="240" stroke="#212529" stroke-width="28" stroke-linecap="round"/>
+  <circle cx="256" cy="240" r="16" fill="#212529"/>
+  <text x="256" y="420" text-anchor="middle" font-family="Arial, sans-serif" font-size="54" fill="#f8f9fa">Ponto</text>
+</svg>
+

@@ -25,7 +25,7 @@ import threading
 from io import BytesIO
 
 import psycopg2
-from flask import Flask, render_template, request, redirect, session, flash, jsonify, send_file
+from flask import Flask, render_template, request, redirect, session, flash, jsonify, send_file, send_from_directory
 from werkzeug.security import generate_password_hash, check_password_hash
 from openpyxl import Workbook
 from openpyxl.styles import Font
@@ -48,6 +48,7 @@ app = Flask(__name__)
 app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "dev_secret_key")
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
 
 DATABASE_PATH = os.getenv("DATABASE_PATH", "web/database.db")
 DATABASE_URL = os.getenv("DATABASE_URL")
@@ -1100,6 +1101,23 @@ def logout():
     """
     session.clear()
     return redirect("/")
+
+
+# ==========================================================
+# PWA (manifest + service worker)
+# ==========================================================
+
+@app.route("/manifest.json")
+def pwa_manifest():
+    return send_from_directory(app.static_folder, "manifest.json", mimetype="application/manifest+json")
+
+
+@app.route("/service-worker.js")
+def pwa_service_worker():
+    resp = send_from_directory(app.static_folder, "service-worker.js", mimetype="application/javascript")
+    # Service worker should not be cached aggressively during development
+    resp.headers["Cache-Control"] = "no-cache"
+    return resp
 
 
 # ==========================================================

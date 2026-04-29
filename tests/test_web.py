@@ -710,6 +710,7 @@ def test_export_pdf_retorna_pdf_valido_e_so_do_usuario(client):
     assert resp.data.startswith(b"%PDF")
 
     # Como o PDF é gerado sem compressão, o texto deve estar presente.
+    assert b"Relat" in resp.data  # "Relatório de Ponto" pode variar por acentuação/fonte no PDF
     assert b"2026-04-11" in resp.data
     assert b"2026-03-10" not in resp.data
 
@@ -739,6 +740,30 @@ def test_export_pdf_respeita_filtro_periodo(client):
     assert b"28/02/2026" in resp.data
     assert b"2026-02-15" in resp.data
     assert b"2026-01-01" not in resp.data
+
+
+def test_export_pdf_nao_quebra_com_muitos_registros(client):
+    _criar_usuario_e_logar(client, "u1", "1234")
+
+    conn = sqlite3.connect("web/database.db")
+    cursor = conn.cursor()
+    rows = []
+    for i in range(1, 41):
+        data = f"2026-03-{i:02d}" if i <= 28 else f"2026-04-{(i-28):02d}"
+        rows.append((1, data, "08:00", "12:00", "13:00", "17:00"))
+    cursor.executemany(
+        """
+        INSERT INTO registros (user_id, data, entrada_manha, saida_almoco, volta_almoco, saida_final)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        rows,
+    )
+    conn.commit()
+    conn.close()
+
+    resp = client.get("/export/pdf")
+    assert resp.status_code == 200
+    assert resp.data.startswith(b"%PDF")
 
 
 def test_alterar_senha_exige_senha_atual_correta(client):

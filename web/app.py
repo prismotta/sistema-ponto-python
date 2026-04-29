@@ -33,6 +33,9 @@ from openpyxl.utils import get_column_letter
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+from reportlab.lib.units import mm
+from reportlab.lib.styles import ParagraphStyle
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 
 
@@ -1276,36 +1279,76 @@ def export_pdf():
     doc = SimpleDocTemplate(
         buffer,
         pagesize=A4,
-        topMargin=36,
-        bottomMargin=36,
-        leftMargin=36,
-        rightMargin=36,
+        topMargin=18 * mm,
+        bottomMargin=18 * mm,
+        leftMargin=16 * mm,
+        rightMargin=16 * mm,
         pageCompression=0,
         title="Relatório de Ponto",
     )
 
     styles = getSampleStyleSheet()
+    styles.add(ParagraphStyle(name="TitleCenter", parent=styles["Title"], alignment=TA_CENTER))
+    styles.add(ParagraphStyle(name="Small", parent=styles["Normal"], fontSize=9, leading=11))
+    styles.add(ParagraphStyle(name="SmallRight", parent=styles["Small"], alignment=TA_RIGHT))
+    styles.add(ParagraphStyle(name="SmallLeft", parent=styles["Small"], alignment=TA_LEFT))
     story = []
 
-    story.append(Paragraph("Relatório de Ponto", styles["Title"]))
-    story.append(Spacer(1, 8))
+    data_geracao = agora().strftime("%d/%m/%Y %H:%M")
 
-    nome_funcionario = perfil.get("nome_funcionario") or ""
-    nome_exibicao = perfil.get("nome_exibicao") or ""
-    nome_empresa = perfil.get("nome_empresa") or ""
+    nome_funcionario = (perfil.get("nome_funcionario") or "").strip()
+    nome_exibicao = (perfil.get("nome_exibicao") or "").strip()
+    nome_empresa = (perfil.get("nome_empresa") or "").strip()
 
-    story.append(Paragraph(f"<b>Funcionário:</b> {nome_funcionario or 'não informado'}", styles["Normal"]))
-    if nome_exibicao:
-        story.append(Paragraph(f"<b>Nome de exibição:</b> {nome_exibicao}", styles["Normal"]))
-    else:
-        story.append(Paragraph("<b>Nome de exibição:</b> -", styles["Normal"]))
-    story.append(Paragraph(f"<b>Empresa:</b> {nome_empresa or '-'}", styles["Normal"]))
-    story.append(Paragraph(f"<b>Período:</b> {periodo}", styles["Normal"]))
-    story.append(Spacer(1, 12))
+    nome_prioritario = nome_exibicao or nome_funcionario or "não informado"
+
+    story.append(Paragraph("Relatório de Ponto", styles["TitleCenter"]))
+    story.append(Spacer(1, 4 * mm))
+
+    header_data = [
+        [
+            Paragraph(f"<b>Funcionário:</b> {nome_prioritario}", styles["SmallLeft"]),
+            Paragraph(f"<b>Data de geração:</b> {data_geracao}", styles["SmallRight"]),
+        ],
+        [
+            Paragraph(f"<b>Nome de exibição:</b> {nome_exibicao or '-'}", styles["SmallLeft"]),
+            Paragraph(f"<b>Período:</b> {periodo}", styles["SmallRight"]),
+        ],
+    ]
+    if nome_empresa:
+        header_data.append(
+            [
+                Paragraph(f"<b>Empresa:</b> {nome_empresa}", styles["SmallLeft"]),
+                Paragraph("", styles["SmallRight"]),
+            ]
+        )
+    if nome_exibicao and nome_funcionario and nome_exibicao != nome_funcionario:
+        header_data.append(
+            [
+                Paragraph(f"<b>Nome do funcionário:</b> {nome_funcionario}", styles["SmallLeft"]),
+                Paragraph("", styles["SmallRight"]),
+            ]
+        )
+
+    header_table = Table(header_data, colWidths=[(A4[0] - doc.leftMargin - doc.rightMargin) * 0.55, (A4[0] - doc.leftMargin - doc.rightMargin) * 0.45])
+    header_table.setStyle(
+        TableStyle(
+            [
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+                ("TOPPADDING", (0, 0), (-1, -1), 2),
+            ]
+        )
+    )
+    story.append(header_table)
+    story.append(Spacer(1, 5 * mm))
 
     data_table = [
         ["Data", "Entrada", "Saída Almoço", "Volta Almoço", "Saída Final", "Total Trabalhado", "Saldo do Dia"]
     ]
+
+    total_periodo = timedelta()
+    banco_periodo = timedelta()
 
     for registro in registros_db:
         total_linha = calcular_total_registro(registro)
@@ -1313,6 +1356,11 @@ def export_pdf():
         em_aberto = not bool(parse_hora(saida_final))
         saldo_delta = None if em_aberto else calcular_saldo_dia(total_linha, esperado_min)
         saldo_str = "em aberto" if em_aberto else (formatar_horas_minutos(saldo_delta) if saldo_delta is not None else "-")
+
+        if not em_aberto:
+            total_periodo += total_linha
+            if saldo_delta is not None:
+                banco_periodo += saldo_delta
 
         data_table.append(
             [
@@ -1326,26 +1374,45 @@ def export_pdf():
             ]
         )
 
-    table = Table(data_table, repeatRows=1)
+    usable_width = A4[0] - doc.leftMargin - doc.rightMargin
+    col_widths = [
+        usable_width * 0.12,  # data
+        usable_width * 0.11,  # entrada
+        usable_width * 0.13,  # saida almoco
+        usable_width * 0.13,  # volta almoco
+        usable_width * 0.11,  # saida final
+        usable_width * 0.14,  # total
+        usable_width * 0.16,  # saldo
+    ]
+
+    table = Table(data_table, repeatRows=1, colWidths=col_widths)
     table.setStyle(
         TableStyle(
             [
-                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#212529")),
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1f2937")),
                 ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
                 ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-                ("FONTSIZE", (0, 0), (-1, -1), 9),
-                ("GRID", (0, 0), (-1, -1), 0.25, colors.grey),
+                ("FONTSIZE", (0, 0), (-1, -1), 8.8),
+                ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#cbd5e1")),
                 ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.whitesmoke, colors.lightgrey]),
+                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.whitesmoke, colors.HexColor("#f1f5f9")]),
                 ("LEFTPADDING", (0, 0), (-1, -1), 4),
                 ("RIGHTPADDING", (0, 0), (-1, -1), 4),
-                ("TOPPADDING", (0, 0), (-1, -1), 3),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                ("ALIGN", (0, 0), (0, -1), "CENTER"),
+                ("ALIGN", (1, 0), (-1, 0), "CENTER"),
+                ("ALIGN", (1, 1), (-2, -1), "CENTER"),
+                ("ALIGN", (-2, 1), (-1, -1), "RIGHT"),
             ]
         )
     )
 
     story.append(table)
+    story.append(Spacer(1, 5 * mm))
+
+    story.append(Paragraph(f"<b>Total de horas trabalhadas:</b> {formatar_duracao_sem_sinal(total_periodo)}", styles["Small"]))
+    story.append(Paragraph(f"<b>Banco de horas do período:</b> {formatar_banco_horas(banco_periodo)}", styles["Small"]))
     doc.build(story)
 
     buffer.seek(0)

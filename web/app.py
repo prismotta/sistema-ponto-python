@@ -450,6 +450,44 @@ def formatar_duracao_sem_sinal(delta: timedelta) -> str:
     return f"{horas}h {minutos:02d}m"
 
 
+def validar_periodo(data_inicio: Optional[str], data_fim: Optional[str]) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+    """
+    Valida datas no formato ISO (YYYY-MM-DD) e garante que data_inicio <= data_fim.
+    Retorna (inicio, fim, erro). inicio/fim são strings ISO normalizadas (ou None).
+    """
+    inicio = (data_inicio or "").strip() or None
+    fim = (data_fim or "").strip() or None
+
+    try:
+        inicio_dt = datetime.strptime(inicio, "%Y-%m-%d").date() if inicio else None
+    except ValueError:
+        return None, None, "Data inicial inválida."
+
+    try:
+        fim_dt = datetime.strptime(fim, "%Y-%m-%d").date() if fim else None
+    except ValueError:
+        return None, None, "Data final inválida."
+
+    if inicio_dt and fim_dt and inicio_dt > fim_dt:
+        return inicio, fim, "Data inicial não pode ser maior que a data final."
+
+    return (inicio_dt.isoformat() if inicio_dt else None), (fim_dt.isoformat() if fim_dt else None), None
+
+
+def aplicar_filtro_periodo_sql(sql_base: str, inicio: Optional[str], fim: Optional[str]) -> Tuple[str, Tuple[Any, ...]]:
+    """
+    Retorna (sql_filtrado, params_adicionais) para filtrar por data.
+    As datas são strings ISO (YYYY-MM-DD), compatíveis com comparação lexicográfica.
+    """
+    if inicio and fim:
+        return sql_base + "\n            AND data BETWEEN ? AND ?", (inicio, fim)
+    if inicio:
+        return sql_base + "\n            AND data >= ?", (inicio,)
+    if fim:
+        return sql_base + "\n            AND data <= ?", (fim,)
+    return sql_base, ()
+
+
 def calcular_total_registro(registro: Tuple[Any, ...]) -> timedelta:
     """
     Calcula o total trabalhado de um registro.
@@ -569,6 +607,16 @@ def dashboard():
     if not usuario_logado():
         return redirect("/")
 
+    data_inicio_raw = request.args.get("data_inicio")
+    data_fim_raw = request.args.get("data_fim")
+    data_inicio, data_fim, erro_periodo = validar_periodo(data_inicio_raw, data_fim_raw)
+    if erro_periodo:
+        flash(erro_periodo, "danger")
+        qs = ""
+        if data_inicio_raw or data_fim_raw:
+            qs = f"?data_inicio={data_inicio_raw or ''}&data_fim={data_fim_raw or ''}"
+        return redirect("/dashboard" + qs)
+
     hoje = agora().strftime("%Y-%m-%d")
 
     conn = conectar()
@@ -586,14 +634,20 @@ def dashboard():
         or "não informado"
     )
 
-    cursor.execute(
-        sql("""
+    sql_query, params_extra = aplicar_filtro_periodo_sql(
+        """
             SELECT id, user_id, data, entrada_manha, saida_almoco, volta_almoco, saida_final
             FROM registros
             WHERE user_id=?
-            ORDER BY data DESC, id DESC
-        """),
-        (session["user_id"],)
+        """,
+        data_inicio,
+        data_fim,
+    )
+    sql_query += "\n            ORDER BY data DESC, id DESC"
+
+    cursor.execute(
+        sql(sql_query),
+        (session["user_id"],) + params_extra,
     )
 
     registros_db = cursor.fetchall()
@@ -637,6 +691,8 @@ def dashboard():
         nome_funcionario=nome_dashboard,
         graf_labels=graf_labels,
         graf_saldo=graf_saldo,
+        data_inicio=data_inicio or "",
+        data_fim=data_fim or "",
     )
 
 
@@ -858,6 +914,16 @@ def export_excel():
     if not usuario_logado():
         return redirect("/")
 
+    data_inicio_raw = request.args.get("data_inicio")
+    data_fim_raw = request.args.get("data_fim")
+    data_inicio, data_fim, erro_periodo = validar_periodo(data_inicio_raw, data_fim_raw)
+    if erro_periodo:
+        flash(erro_periodo, "danger")
+        qs = ""
+        if data_inicio_raw or data_fim_raw:
+            qs = f"?data_inicio={data_inicio_raw or ''}&data_fim={data_fim_raw or ''}"
+        return redirect("/dashboard" + qs)
+
     user_id = session["user_id"]
     perfil = obter_perfil_usuario(user_id)
     esperado_min = perfil.get("horas_diarias_esperadas_min")
@@ -866,21 +932,35 @@ def export_excel():
 
     conn = conectar()
     cursor = conn.cursor()
-    cursor.execute(
-        sql("""
+    sql_query, params_extra = aplicar_filtro_periodo_sql(
+        """
             SELECT id, user_id, data, entrada_manha, saida_almoco, volta_almoco, saida_final
             FROM registros
             WHERE user_id=?
-            ORDER BY data DESC, id DESC
-        """),
-        (user_id,),
+        """,
+        data_inicio,
+        data_fim,
     )
+    sql_query += "\n            ORDER BY data DESC, id DESC"
+    cursor.execute(sql(sql_query), (user_id,) + params_extra)
     registros_db = cursor.fetchall()
     conn.close()
 
     wb = Workbook()
     ws = wb.active
     ws.title = "Registros"
+
+    if data_inicio and data_fim:
+        periodo = f"Período: {datetime.strptime(data_inicio, '%Y-%m-%d').strftime('%d/%m/%Y')} até {datetime.strptime(data_fim, '%Y-%m-%d').strftime('%d/%m/%Y')}"
+    elif data_inicio:
+        periodo = f"Período: a partir de {datetime.strptime(data_inicio, '%Y-%m-%d').strftime('%d/%m/%Y')}"
+    elif data_fim:
+        periodo = f"Período: até {datetime.strptime(data_fim, '%Y-%m-%d').strftime('%d/%m/%Y')}"
+    else:
+        periodo = "Período: todos os registros"
+
+    ws.append([periodo])
+    ws.append([])
 
     headers = [
         "Data",
@@ -893,7 +973,8 @@ def export_excel():
     ]
     ws.append(headers)
 
-    for cell in ws[1]:
+    ws["A1"].font = Font(bold=True)
+    for cell in ws[3]:
         cell.font = Font(bold=True)
 
     for registro in registros_db:
@@ -915,7 +996,7 @@ def export_excel():
             ]
         )
 
-    ws.freeze_panes = "A2"
+    ws.freeze_panes = "A4"
 
     # Ajuste simples de largura das colunas
     for col_idx, _ in enumerate(headers, start=1):

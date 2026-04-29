@@ -1,6 +1,6 @@
 /* Basic PWA service worker for Sistema de Ponto */
 
-const CACHE_NAME = "ponto-pwa-v2";
+const CACHE_NAME = "ponto-pwa-v3";
 const PRECACHE_URLS = [
   "/",
   "/manifest.json",

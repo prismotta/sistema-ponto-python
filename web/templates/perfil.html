@@ -22,7 +22,7 @@
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}
         {% for category, message in messages %}
-          <div class="alert alert-{{ 'success' if category == 'success' else 'danger' }} alert-dismissible fade show" role="alert">
+          <div class="alert alert-{{ 'success' if category == 'success' else ('danger' if category == 'error' else ('warning' if category == 'warning' else 'info')) }} alert-dismissible fade show" role="alert">
             {{ message }}
             <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
           </div>
@@ -61,12 +61,37 @@
         </div>
     </div>
 
+    <div class="card shadow-sm mb-4">
+        <div class="card-body">
+            <h5 class="card-title">Alterar senha</h5>
+
+            <form method="POST" action="/perfil/alterar-senha">
+                <div class="mb-3">
+                    <label class="form-label">Senha atual</label>
+                    <input type="password" name="senha_atual" class="form-control" required>
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label">Nova senha</label>
+                    <input type="password" name="nova_senha" class="form-control" required>
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label">Confirmar nova senha</label>
+                    <input type="password" name="confirmar_nova_senha" class="form-control" required>
+                </div>
+
+                <button type="submit" class="btn btn-secondary">Alterar senha</button>
+            </form>
+        </div>
+    </div>
+
     <div class="card shadow-sm border-danger">
         <div class="card-body">
             <h5 class="card-title text-danger">Excluir conta</h5>
             <p class="text-muted mb-3">Essa ação é irreversível. Todos os seus registros serão apagados.</p>
 
-            <form method="POST" action="/perfil/excluir-conta" onsubmit="return confirm('Tem certeza que deseja excluir sua conta? Essa ação é irreversível.');">
+            <form method="POST" action="/perfil/excluir-conta" onsubmit="return confirm('Tem certeza que deseja excluir sua conta? Essa ação é irreversível e apagará todos os seus registros.');">
                 <div class="mb-3">
                     <label class="form-label">Digite <strong>EXCLUIR</strong> para confirmar</label>
                     <input type="text" name="confirmacao" class="form-control" required>

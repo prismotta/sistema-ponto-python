@@ -741,6 +741,78 @@ def test_export_pdf_respeita_filtro_periodo(client):
     assert b"2026-01-01" not in resp.data
 
 
+def test_alterar_senha_exige_senha_atual_correta(client):
+    _criar_usuario_e_logar(client, "u1", "1234")
+    resp = client.post(
+        "/perfil/alterar-senha",
+        data={"senha_atual": "errada", "nova_senha": "nova", "confirmar_nova_senha": "nova"},
+        follow_redirects=True,
+    )
+    assert resp.status_code == 200
+    assert "Senha atual incorreta.".encode("utf-8") in resp.data
+
+
+def test_alterar_senha_sucesso_e_login_com_nova_senha(client):
+    _criar_usuario_e_logar(client, "u1", "1234")
+    resp = client.post(
+        "/perfil/alterar-senha",
+        data={"senha_atual": "1234", "nova_senha": "nova123", "confirmar_nova_senha": "nova123"},
+        follow_redirects=True,
+    )
+    assert resp.status_code == 200
+    assert "Senha alterada com sucesso.".encode("utf-8") in resp.data
+
+    client.get("/logout")
+    resp_login = client.post("/", data={"username": "u1", "password": "nova123"}, follow_redirects=False)
+    assert resp_login.status_code == 302
+    assert "/dashboard" in resp_login.headers["Location"]
+
+
+def test_dashboard_mostra_botao_este_mes_e_banco_de_horas(client):
+    _criar_usuario_e_logar(client, "u1", "1234")
+
+    # Define esperado: 8h (default já é 8h, mas mantém explícito)
+    client.post("/perfil", data={"horas_diarias_esperadas": "8"}, follow_redirects=True)
+
+    conn = sqlite3.connect("web/database.db")
+    cursor = conn.cursor()
+    # +1h
+    cursor.execute(
+        """
+        INSERT INTO registros (user_id, data, entrada_manha, saida_almoco, volta_almoco, saida_final)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (1, "2026-04-10", "08:00", "12:00", "13:00", "18:00"),
+    )
+    # -1h
+    cursor.execute(
+        """
+        INSERT INTO registros (user_id, data, entrada_manha, saida_almoco, volta_almoco, saida_final)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (1, "2026-04-11", "08:00", "12:00", "13:00", "16:00"),
+    )
+    conn.commit()
+    conn.close()
+
+    resp = client.get("/dashboard")
+    assert resp.status_code == 200
+    assert b"Este m\xc3\xaas" in resp.data
+    assert "Banco de horas do período:".encode("utf-8") in resp.data
+    assert b"+0h 00m" in resp.data
+
+
+def test_404_amigavel_mostra_botao_voltar(client):
+    resp = client.get("/nao-existe")
+    assert resp.status_code == 404
+    assert b"404" in resp.data
+
+    _criar_usuario_e_logar(client, "u1", "1234")
+    resp2 = client.get("/nao-existe-2")
+    assert resp2.status_code == 404
+    assert b"/dashboard" in resp2.data
+
+
 def test_deletar_conta_apaga_registros_e_desloga(client):
     _criar_usuario_e_logar(client)
     client.get("/bater")

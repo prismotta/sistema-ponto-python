@@ -250,6 +250,22 @@ def exigir_login_api():
     return None
 
 
+def flash_ok(msg: str) -> None:
+    flash(msg, "success")
+
+
+def flash_erro(msg: str) -> None:
+    flash(msg, "error")
+
+
+def flash_aviso(msg: str) -> None:
+    flash(msg, "warning")
+
+
+def flash_info(msg: str) -> None:
+    flash(msg, "info")
+
+
 def obter_perfil_usuario(user_id: int) -> Dict[str, Any]:
     conn = conectar()
     cursor = conn.cursor()
@@ -615,7 +631,7 @@ def dashboard():
     data_fim_raw = request.args.get("data_fim")
     data_inicio, data_fim, erro_periodo = validar_periodo(data_inicio_raw, data_fim_raw)
     if erro_periodo:
-        flash(erro_periodo, "danger")
+        flash_erro(erro_periodo)
         qs = ""
         if data_inicio_raw or data_fim_raw:
             qs = f"?data_inicio={data_inicio_raw or ''}&data_fim={data_fim_raw or ''}"
@@ -661,6 +677,7 @@ def dashboard():
     total_hoje = timedelta()
     graf_labels: list[str] = []
     graf_saldo: list[float] = []
+    banco_periodo = timedelta()
 
     for registro in registros_db:
         total_linha = calcular_total_registro(registro)
@@ -675,6 +692,8 @@ def dashboard():
         if not em_aberto:
             graf_labels.append(registro[2])
             graf_saldo.append(horas_decimal(saldo_delta or timedelta()))
+            if saldo_delta is not None:
+                banco_periodo += saldo_delta
 
         registros.append({
             "id": registro[0],
@@ -697,6 +716,7 @@ def dashboard():
         graf_saldo=graf_saldo,
         data_inicio=data_inicio or "",
         data_fim=data_fim or "",
+        banco_periodo=formatar_horas_minutos(banco_periodo),
     )
 
 
@@ -716,10 +736,10 @@ def perfil():
             },
         )
         if not ok:
-            flash(erro or "Não foi possível salvar o perfil.", "danger")
+            flash_erro(erro or "Não foi possível salvar o perfil.")
             return redirect("/perfil")
 
-        flash("Perfil salvo com sucesso.", "success")
+        flash_ok("Perfil salvo com sucesso.")
         return redirect("/perfil")
 
     perfil_atual = obter_perfil_usuario(session["user_id"])
@@ -735,15 +755,56 @@ def perfil():
     )
 
 
+@app.route("/perfil/alterar-senha", methods=["POST"])
+def alterar_senha():
+    if not usuario_logado():
+        return redirect("/")
+
+    senha_atual = request.form.get("senha_atual") or ""
+    nova_senha = request.form.get("nova_senha") or ""
+    confirmar_nova = request.form.get("confirmar_nova_senha") or ""
+
+    if not nova_senha.strip():
+        flash_erro("Nova senha não pode ser vazia.")
+        return redirect("/perfil")
+
+    if nova_senha != confirmar_nova:
+        flash_erro("Nova senha e confirmação não conferem.")
+        return redirect("/perfil")
+
+    conn = conectar()
+    cursor = conn.cursor()
+    cursor.execute(sql("SELECT password FROM usuarios WHERE id=?"), (session["user_id"],))
+    row = cursor.fetchone()
+    if not row:
+        conn.close()
+        flash_erro("Usuário não encontrado.")
+        return redirect("/perfil")
+
+    senha_hash = row[0]
+    if not check_password_hash(senha_hash, senha_atual):
+        conn.close()
+        flash_erro("Senha atual incorreta.")
+        return redirect("/perfil")
+
+    nova_hash = generate_password_hash(nova_senha)
+    cursor.execute(sql("UPDATE usuarios SET password=? WHERE id=?"), (nova_hash, session["user_id"]))
+    conn.commit()
+    conn.close()
+
+    flash_ok("Senha alterada com sucesso.")
+    return redirect("/perfil")
+
+
 @app.route("/registros/<int:registro_id>/excluir", methods=["POST"])
 def excluir_registro(registro_id: int):
     if not usuario_logado():
         return redirect("/")
 
     if excluir_registro_usuario(session["user_id"], registro_id):
-        flash("Registro excluído com sucesso.", "success")
+        flash_ok("Registro excluído com sucesso.")
     else:
-        flash("Registro não encontrado.", "danger")
+        flash_erro("Registro não encontrado.")
 
     return redirect("/dashboard")
 
@@ -755,14 +816,14 @@ def excluir_conta():
 
     confirmacao = (request.form.get("confirmacao") or "").strip()
     if confirmacao != "EXCLUIR":
-        flash("Confirmação inválida. Digite EXCLUIR para apagar sua conta.", "danger")
+        flash_erro("Confirmação inválida. Digite EXCLUIR para apagar sua conta.")
         return redirect("/perfil")
 
     user_id = session["user_id"]
     excluir_conta_usuario(user_id)
 
     session.clear()
-    flash("Conta excluída com sucesso.", "success")
+    flash_ok("Conta excluída com sucesso.")
     return redirect("/")
 
 
@@ -779,6 +840,7 @@ def bater():
         return redirect("/")
 
     registrar_ponto(session["user_id"], agora())
+    flash_ok("Ponto registrado com sucesso.")
 
     return redirect("/dashboard")
 
@@ -910,6 +972,22 @@ def logout():
     return redirect("/")
 
 
+# ==========================================================
+# ERROS (PÁGINAS AMIGÁVEIS)
+# ==========================================================
+
+@app.errorhandler(404)
+def page_not_found(e):
+    destino = "/dashboard" if usuario_logado() else "/"
+    return render_template("404.html", destino=destino), 404
+
+
+@app.errorhandler(500)
+def internal_error(e):
+    destino = "/dashboard" if usuario_logado() else "/"
+    return render_template("500.html", destino=destino), 500
+
+
 @app.route("/export/excel")
 def export_excel():
     """
@@ -922,7 +1000,7 @@ def export_excel():
     data_fim_raw = request.args.get("data_fim")
     data_inicio, data_fim, erro_periodo = validar_periodo(data_inicio_raw, data_fim_raw)
     if erro_periodo:
-        flash(erro_periodo, "danger")
+        flash_erro(erro_periodo)
         qs = ""
         if data_inicio_raw or data_fim_raw:
             qs = f"?data_inicio={data_inicio_raw or ''}&data_fim={data_fim_raw or ''}"
@@ -949,6 +1027,13 @@ def export_excel():
     cursor.execute(sql(sql_query), (user_id,) + params_extra)
     registros_db = cursor.fetchall()
     conn.close()
+
+    if not registros_db:
+        flash_aviso("Não há registros no período selecionado para exportar.")
+        qs = ""
+        if data_inicio or data_fim:
+            qs = f"?data_inicio={data_inicio or ''}&data_fim={data_fim or ''}"
+        return redirect("/dashboard" + qs)
 
     wb = Workbook()
     ws = wb.active
@@ -1036,7 +1121,7 @@ def export_pdf():
     data_fim_raw = request.args.get("data_fim")
     data_inicio, data_fim, erro_periodo = validar_periodo(data_inicio_raw, data_fim_raw)
     if erro_periodo:
-        flash(erro_periodo, "danger")
+        flash_erro(erro_periodo)
         qs = ""
         if data_inicio_raw or data_fim_raw:
             qs = f"?data_inicio={data_inicio_raw or ''}&data_fim={data_fim_raw or ''}"
@@ -1063,6 +1148,13 @@ def export_pdf():
     cursor.execute(sql(sql_query), (user_id,) + params_extra)
     registros_db = cursor.fetchall()
     conn.close()
+
+    if not registros_db:
+        flash_aviso("Não há registros no período selecionado para exportar.")
+        qs = ""
+        if data_inicio or data_fim:
+            qs = f"?data_inicio={data_inicio or ''}&data_fim={data_fim or ''}"
+        return redirect("/dashboard" + qs)
 
     if data_inicio and data_fim:
         periodo = f"{datetime.strptime(data_inicio, '%Y-%m-%d').strftime('%d/%m/%Y')} até {datetime.strptime(data_fim, '%Y-%m-%d').strftime('%d/%m/%Y')}"

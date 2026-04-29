@@ -22,7 +22,7 @@
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}
         {% for category, message in messages %}
-          <div class="alert alert-{{ 'success' if category == 'success' else 'danger' }} alert-dismissible fade show" role="alert">
+          <div class="alert alert-{{ 'success' if category == 'success' else ('danger' if category == 'error' else ('warning' if category == 'warning' else 'info')) }} alert-dismissible fade show" role="alert">
             {{ message }}
             <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
           </div>
@@ -85,9 +85,15 @@
                     <input type="date" class="form-control" name="data_fim" value="{{ data_fim }}">
                 </div>
                 <div class="col-12 col-md-4">
-                    <button type="submit" class="btn btn-secondary w-100">Filtrar</button>
+                    <div class="d-flex gap-2">
+                        <button type="submit" class="btn btn-secondary flex-fill">Filtrar</button>
+                        <button type="button" class="btn btn-outline-secondary" id="btnEsteMes">Este mês</button>
+                    </div>
                 </div>
             </form>
+
+            <p class="mb-3"><strong>Banco de horas do período:</strong> {{ banco_periodo }}</p>
+
             <div class="table-responsive">
                 <table class="table table-striped table-bordered">
                     <thead class="table-dark">
@@ -113,7 +119,7 @@
                             <td>{{ r.total }}</td>
                             <td>{{ r.saldo }}</td>
                             <td class="text-center">
-                                <form method="POST" action="/registros/{{ r.id }}/excluir" onsubmit="return confirm('Tem certeza que deseja excluir este registro?');" style="display:inline;">
+                                <form method="POST" action="/registros/{{ r.id }}/excluir" onsubmit="return confirm('Tem certeza que deseja excluir este registro? Essa ação não pode ser desfeita.');" style="display:inline;">
                                     <button type="submit" class="btn btn-sm btn-danger">Excluir</button>
                                 </form>
                             </td>
@@ -184,6 +190,29 @@
       }
     });
   }
+
+  const btnEsteMes = document.getElementById('btnEsteMes');
+  if (btnEsteMes) {
+    btnEsteMes.addEventListener('click', () => {
+      const inicio = document.querySelector('input[name=\"data_inicio\"]');
+      const fim = document.querySelector('input[name=\"data_fim\"]');
+      if (!inicio || !fim) return;
+
+      const now = new Date();
+      const first = new Date(now.getFullYear(), now.getMonth(), 1);
+      const last = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+
+      const pad = (n) => String(n).padStart(2, '0');
+      const toISO = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+
+      inicio.value = toISO(first);
+      fim.value = toISO(last);
+
+      const form = inicio.closest('form');
+      if (form) form.submit();
+    });
+  }
 </script>
 </body>
 </html>
+

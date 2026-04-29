@@ -752,6 +752,28 @@ def dashboard():
             "saldo": saldo_str,
         })
 
+    # Status do dia (hoje) — baseado no total do dia e se existe registro em aberto
+    status_texto = "Não iniciada"
+    status_classe = "secondary"
+    saldo_hoje_str = "-"
+    total_hoje_str = formatar_duracao_sem_sinal(total_hoje)
+
+    registros_hoje = [r for r in registros_db if r[2] == hoje and r[3]]
+    if registros_hoje:
+        existe_em_aberto = any(not r[6] for r in registros_hoje)
+        if existe_em_aberto:
+            status_texto = "Em andamento"
+            status_classe = "info"
+        else:
+            saldo_delta_hoje = calcular_saldo_dia(total_hoje, esperado_min)
+            saldo_hoje_str = formatar_horas_minutos(saldo_delta_hoje or timedelta())
+            if total_hoje >= timedelta(minutes=int(esperado_min)):
+                status_texto = "Jornada completa"
+                status_classe = "success"
+            else:
+                status_texto = "Jornada incompleta"
+                status_classe = "warning"
+
     return render_template(
         "dashboard.html",
         registros=registros,
@@ -763,6 +785,10 @@ def dashboard():
         data_fim=data_fim or "",
         banco_periodo=formatar_horas_minutos(banco_periodo),
         banco_mes_atual=formatar_banco_horas(banco_mes),
+        status_dia_texto=status_texto,
+        status_dia_classe=status_classe,
+        total_hoje_status=total_hoje_str,
+        saldo_hoje_status=saldo_hoje_str,
     )
 
 

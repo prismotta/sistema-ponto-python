@@ -862,6 +862,66 @@ def test_404_amigavel_mostra_botao_voltar(client):
     assert b"/dashboard" in resp2.data
 
 
+def test_status_dia_nao_iniciada(client):
+    _criar_usuario_e_logar(client, "u1", "1234")
+    resp = client.get("/dashboard")
+    assert resp.status_code == 200
+    assert "Não iniciada".encode("utf-8") in resp.data
+
+
+def test_status_dia_em_andamento(client):
+    _criar_usuario_e_logar(client, "u1", "1234")
+    # cria entrada hoje em aberto via rota existente
+    client.get("/bater")
+    resp = client.get("/dashboard")
+    assert resp.status_code == 200
+    assert "Em andamento".encode("utf-8") in resp.data
+
+
+def test_status_dia_jornada_completa(client):
+    _criar_usuario_e_logar(client, "u1", "1234")
+    client.post("/perfil", data={"horas_diarias_esperadas": "8"}, follow_redirects=True)
+
+    hoje = datetime.now().strftime("%Y-%m-%d")
+    conn = sqlite3.connect("web/database.db")
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        INSERT INTO registros (user_id, data, entrada_manha, saida_almoco, volta_almoco, saida_final)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (1, hoje, "08:00", "12:00", "13:00", "17:00"),
+    )
+    conn.commit()
+    conn.close()
+
+    resp = client.get("/dashboard")
+    assert resp.status_code == 200
+    assert "Jornada completa".encode("utf-8") in resp.data
+
+
+def test_status_dia_jornada_incompleta(client):
+    _criar_usuario_e_logar(client, "u1", "1234")
+    client.post("/perfil", data={"horas_diarias_esperadas": "8"}, follow_redirects=True)
+
+    hoje = datetime.now().strftime("%Y-%m-%d")
+    conn = sqlite3.connect("web/database.db")
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        INSERT INTO registros (user_id, data, entrada_manha, saida_almoco, volta_almoco, saida_final)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (1, hoje, "08:00", "12:00", "13:00", "16:00"),
+    )
+    conn.commit()
+    conn.close()
+
+    resp = client.get("/dashboard")
+    assert resp.status_code == 200
+    assert "Jornada incompleta".encode("utf-8") in resp.data
+
+
 def test_deletar_conta_apaga_registros_e_desloga(client):
     _criar_usuario_e_logar(client)
     client.get("/bater")

@@ -394,6 +394,105 @@ def test_dashboard_botao_registrar_ponto(client):
     assert b"Registrar Ponto" in response.data
 
 
+def test_api_sem_login_deve_falhar(client):
+    resp = client.get("/api/profile")
+    assert resp.status_code == 401
+    assert resp.is_json
+    assert resp.json["success"] is False
+
+
+def test_api_get_profile_logado(client):
+    _criar_usuario_e_logar(client)
+    client.put(
+        "/api/profile",
+        json={"nome_funcionario": "João da Silva", "nome_exibicao": "João", "nome_empresa": "Empresa X", "horas_diarias_esperadas": "8"},
+    )
+    resp = client.get("/api/profile")
+    assert resp.status_code == 200
+    assert resp.is_json
+    assert resp.json["success"] is True
+    assert resp.json["profile"]["nome_funcionario"] == "João da Silva"
+    assert resp.json["profile"]["nome_exibicao"] == "João"
+
+
+def test_api_put_profile_atualiza_perfil(client):
+    _criar_usuario_e_logar(client)
+    resp = client.put(
+        "/api/profile",
+        json={"nome_funcionario": "Maria Souza", "nome_exibicao": "Mari", "nome_empresa": "ACME", "horas_diarias_esperadas": "08:30"},
+    )
+    assert resp.status_code == 200
+    assert resp.is_json
+    assert resp.json["success"] is True
+    assert resp.json["profile"]["horas_diarias_esperadas_min"] == 8 * 60 + 30
+
+
+def test_api_listar_registros_apenas_do_usuario(client):
+    _criar_usuario_e_logar(client, "u1", "1234")
+    client.post("/api/ponto")
+
+    client.get("/logout")
+    _criar_usuario_e_logar(client, "u2", "1234")
+    client.post("/api/ponto")
+
+    resp = client.get("/api/registros")
+    assert resp.status_code == 200
+    assert resp.is_json
+    assert resp.json["success"] is True
+    assert len(resp.json["registros"]) == 1
+
+
+def test_api_registrar_ponto(client):
+    _criar_usuario_e_logar(client)
+    resp = client.post("/api/ponto")
+    assert resp.status_code == 201
+    assert resp.is_json
+    assert resp.json["success"] is True
+
+    resp_list = client.get("/api/registros")
+    assert resp_list.status_code == 200
+    assert len(resp_list.json["registros"]) >= 1
+
+
+def test_api_deletar_registro_proprio(client):
+    _criar_usuario_e_logar(client)
+    client.post("/api/ponto")
+
+    resp_list = client.get("/api/registros")
+    registro_id = resp_list.json["registros"][0]["id"]
+
+    resp_del = client.delete(f"/api/registros/{registro_id}")
+    assert resp_del.status_code == 200
+    assert resp_del.is_json
+    assert resp_del.json["success"] is True
+
+
+def test_api_impede_deletar_registro_de_outro_usuario(client):
+    _criar_usuario_e_logar(client, "u1", "1234")
+    client.post("/api/ponto")
+    resp_list = client.get("/api/registros")
+    registro_id = resp_list.json["registros"][0]["id"]
+
+    client.get("/logout")
+    _criar_usuario_e_logar(client, "u2", "1234")
+    resp_del = client.delete(f"/api/registros/{registro_id}")
+    assert resp_del.status_code == 404
+    assert resp_del.is_json
+    assert resp_del.json["success"] is False
+
+
+def test_api_deletar_conta_logada(client):
+    _criar_usuario_e_logar(client)
+    resp = client.delete("/api/account", json={"confirmacao": "EXCLUIR"})
+    assert resp.status_code == 200
+    assert resp.is_json
+    assert resp.json["success"] is True
+
+    # Deve estar deslogado
+    resp2 = client.get("/api/profile")
+    assert resp2.status_code == 401
+
+
 def test_deletar_conta_apaga_registros_e_desloga(client):
     _criar_usuario_e_logar(client)
     client.get("/bater")

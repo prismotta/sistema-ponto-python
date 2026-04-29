@@ -24,7 +24,7 @@ from typing import Optional, Tuple, Any, Dict
 import threading
 
 import psycopg2
-from flask import Flask, render_template, request, redirect, session, flash
+from flask import Flask, render_template, request, redirect, session, flash, jsonify
 from werkzeug.security import generate_password_hash, check_password_hash
 
 
@@ -225,6 +225,23 @@ def usuario_logado() -> bool:
     return "user_id" in session
 
 
+def api_erro(mensagem: str, status_code: int = 400):
+    return jsonify({"success": False, "error": mensagem}), status_code
+
+
+def api_ok(payload: Optional[Dict[str, Any]] = None, status_code: int = 200):
+    data: Dict[str, Any] = {"success": True}
+    if payload:
+        data.update(payload)
+    return jsonify(data), status_code
+
+
+def exigir_login_api():
+    if not usuario_logado():
+        return api_erro("Não autenticado", 401)
+    return None
+
+
 def obter_perfil_usuario(user_id: int) -> Dict[str, Any]:
     conn = conectar()
     cursor = conn.cursor()
@@ -250,6 +267,120 @@ def primeiro_nome(nome: Optional[str]) -> Optional[str]:
         return None
     partes = [p for p in nome.strip().split() if p]
     return partes[0] if partes else None
+
+
+def perfil_para_json(perfil: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "nome_funcionario": perfil.get("nome_funcionario"),
+        "nome_exibicao": perfil.get("nome_exibicao"),
+        "nome_empresa": perfil.get("nome_empresa"),
+        "horas_diarias_esperadas_min": perfil.get("horas_diarias_esperadas_min"),
+    }
+
+
+def atualizar_perfil_usuario(user_id: int, dados: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
+    nome_funcionario = (dados.get("nome_funcionario") or "").strip() or None
+    nome_exibicao = (dados.get("nome_exibicao") or "").strip() or None
+    nome_empresa = (dados.get("nome_empresa") or "").strip() or None
+    horas_texto = dados.get("horas_diarias_esperadas") or ""
+
+    horas_min = parse_horas_esperadas_min(horas_texto)
+    if str(horas_texto).strip() and horas_min is None:
+        return False, "Formato inválido em horas diárias esperadas. Use 8, 8.5 ou 08:00."
+
+    conn = conectar()
+    cursor = conn.cursor()
+    cursor.execute(
+        sql("""
+            UPDATE usuarios
+            SET nome_funcionario=?, nome_exibicao=?, nome_empresa=?, horas_diarias_esperadas_min=?
+            WHERE id=?
+        """),
+        (nome_funcionario, nome_exibicao, nome_empresa, horas_min, user_id),
+    )
+    conn.commit()
+    conn.close()
+
+    return True, None
+
+
+def excluir_registro_usuario(user_id: int, registro_id: int) -> bool:
+    conn = conectar()
+    cursor = conn.cursor()
+    cursor.execute(sql("DELETE FROM registros WHERE id=? AND user_id=?"), (registro_id, user_id))
+    apagados = cursor.rowcount
+    conn.commit()
+    conn.close()
+    return bool(apagados)
+
+
+def excluir_conta_usuario(user_id: int) -> None:
+    conn = conectar()
+    cursor = conn.cursor()
+    cursor.execute(sql("DELETE FROM registros WHERE user_id=?"), (user_id,))
+    cursor.execute(sql("DELETE FROM usuarios WHERE id=?"), (user_id,))
+    conn.commit()
+    conn.close()
+
+
+def registrar_ponto(user_id: int, quando: datetime) -> Dict[str, Any]:
+    hoje = quando.strftime("%Y-%m-%d")
+    hora_atual = quando.strftime("%H:%M:%S")
+
+    conn = conectar()
+    cursor = conn.cursor()
+    cursor.execute(
+        sql("""
+            SELECT id, entrada_manha, saida_almoco, volta_almoco, saida_final
+            FROM registros
+            WHERE user_id=? AND data=?
+            ORDER BY id DESC LIMIT 1
+        """),
+        (user_id, hoje),
+    )
+    registro = cursor.fetchone()
+
+    acao = "criado"
+    campo = "entrada_manha"
+    registro_id = None
+
+    if not registro:
+        cursor.execute(
+            sql("INSERT INTO registros (user_id, data, entrada_manha) VALUES (?, ?, ?)"),
+            (user_id, hoje, hora_atual),
+        )
+        registro_id = cursor.lastrowid if not IS_POSTGRES else None
+    else:
+        registro_id = registro[0]
+        saida_almoco = registro[2]
+        volta_almoco = registro[3]
+        saida_final = registro[4]
+
+        if not saida_almoco:
+            cursor.execute(sql("UPDATE registros SET saida_almoco=? WHERE id=?"), (hora_atual, registro_id))
+            acao = "atualizado"
+            campo = "saida_almoco"
+        elif not volta_almoco:
+            cursor.execute(sql("UPDATE registros SET volta_almoco=? WHERE id=?"), (hora_atual, registro_id))
+            acao = "atualizado"
+            campo = "volta_almoco"
+        elif not saida_final:
+            cursor.execute(sql("UPDATE registros SET saida_final=? WHERE id=?"), (hora_atual, registro_id))
+            acao = "atualizado"
+            campo = "saida_final"
+        else:
+            cursor.execute(
+                sql("INSERT INTO registros (user_id, data, entrada_manha) VALUES (?, ?, ?)"),
+                (user_id, hoje, hora_atual),
+            )
+            acao = "criado"
+            campo = "entrada_manha"
+            registro_id = cursor.lastrowid if not IS_POSTGRES else None
+
+    conn.commit()
+    conn.close()
+
+    return {"acao": acao, "campo": campo, "data": hoje, "hora": hora_atual, "registro_id": registro_id}
 
 
 def parse_horas_esperadas_min(valor: Optional[str]) -> Optional[int]:
@@ -491,28 +622,18 @@ def perfil():
         return redirect("/")
 
     if request.method == "POST":
-        nome_funcionario = (request.form.get("nome_funcionario") or "").strip() or None
-        nome_exibicao = (request.form.get("nome_exibicao") or "").strip() or None
-        nome_empresa = (request.form.get("nome_empresa") or "").strip() or None
-        horas_texto = request.form.get("horas_diarias_esperadas") or ""
-
-        horas_min = parse_horas_esperadas_min(horas_texto)
-        if horas_texto.strip() and horas_min is None:
-            flash("Formato inválido em horas diárias esperadas. Use 8, 8.5 ou 08:00.", "danger")
-            return redirect("/perfil")
-
-        conn = conectar()
-        cursor = conn.cursor()
-        cursor.execute(
-            sql("""
-                UPDATE usuarios
-                SET nome_funcionario=?, nome_exibicao=?, nome_empresa=?, horas_diarias_esperadas_min=?
-                WHERE id=?
-            """),
-            (nome_funcionario, nome_exibicao, nome_empresa, horas_min, session["user_id"]),
+        ok, erro = atualizar_perfil_usuario(
+            session["user_id"],
+            {
+                "nome_funcionario": request.form.get("nome_funcionario"),
+                "nome_exibicao": request.form.get("nome_exibicao"),
+                "nome_empresa": request.form.get("nome_empresa"),
+                "horas_diarias_esperadas": request.form.get("horas_diarias_esperadas"),
+            },
         )
-        conn.commit()
-        conn.close()
+        if not ok:
+            flash(erro or "Não foi possível salvar o perfil.", "danger")
+            return redirect("/perfil")
 
         flash("Perfil salvo com sucesso.", "success")
         return redirect("/perfil")
@@ -535,17 +656,7 @@ def excluir_registro(registro_id: int):
     if not usuario_logado():
         return redirect("/")
 
-    conn = conectar()
-    cursor = conn.cursor()
-    cursor.execute(
-        sql("DELETE FROM registros WHERE id=? AND user_id=?"),
-        (registro_id, session["user_id"]),
-    )
-    apagados = cursor.rowcount
-    conn.commit()
-    conn.close()
-
-    if apagados:
+    if excluir_registro_usuario(session["user_id"], registro_id):
         flash("Registro excluído com sucesso.", "success")
     else:
         flash("Registro não encontrado.", "danger")
@@ -564,12 +675,7 @@ def excluir_conta():
         return redirect("/perfil")
 
     user_id = session["user_id"]
-    conn = conectar()
-    cursor = conn.cursor()
-    cursor.execute(sql("DELETE FROM registros WHERE user_id=?"), (user_id,))
-    cursor.execute(sql("DELETE FROM usuarios WHERE id=?"), (user_id,))
-    conn.commit()
-    conn.close()
+    excluir_conta_usuario(user_id)
 
     session.clear()
     flash("Conta excluída com sucesso.", "success")
@@ -588,61 +694,127 @@ def bater():
     if not usuario_logado():
         return redirect("/")
 
-    agora_local = agora()
-    hoje = agora_local.strftime("%Y-%m-%d")
-    hora_atual = agora_local.strftime("%H:%M:%S")
+    registrar_ponto(session["user_id"], agora())
+
+    return redirect("/dashboard")
+
+
+# ==========================================================
+# API REST (JSON)
+# ==========================================================
+
+@app.route("/api/profile", methods=["GET"])
+def api_get_profile():
+    erro = exigir_login_api()
+    if erro:
+        return erro
+
+    perfil = obter_perfil_usuario(session["user_id"])
+    return api_ok({"profile": perfil_para_json(perfil)})
+
+
+@app.route("/api/profile", methods=["PUT"])
+def api_put_profile():
+    erro = exigir_login_api()
+    if erro:
+        return erro
+
+    dados = request.get_json(silent=True) or {}
+    ok, mensagem = atualizar_perfil_usuario(session["user_id"], dados)
+    if not ok:
+        return api_erro(mensagem or "Dados inválidos", 400)
+
+    perfil = obter_perfil_usuario(session["user_id"])
+    return api_ok({"profile": perfil_para_json(perfil)})
+
+
+@app.route("/api/registros", methods=["GET"])
+def api_listar_registros():
+    erro = exigir_login_api()
+    if erro:
+        return erro
+
+    perfil = obter_perfil_usuario(session["user_id"])
+    esperado_min = perfil.get("horas_diarias_esperadas_min")
+    if esperado_min is None:
+        esperado_min = 8 * 60
 
     conn = conectar()
     cursor = conn.cursor()
-
     cursor.execute(
         sql("""
-            SELECT id, entrada_manha, saida_almoco, volta_almoco, saida_final
+            SELECT id, user_id, data, entrada_manha, saida_almoco, volta_almoco, saida_final
             FROM registros
-            WHERE user_id=? AND data=?
-            ORDER BY id DESC LIMIT 1
+            WHERE user_id=?
+            ORDER BY data DESC, id DESC
         """),
-        (session["user_id"], hoje)
+        (session["user_id"],),
     )
-
-    registro = cursor.fetchone()
-
-    if not registro:
-        cursor.execute(
-            sql("INSERT INTO registros (user_id, data, entrada_manha) VALUES (?, ?, ?)"),
-            (session["user_id"], hoje, hora_atual)
-        )
-    else:
-        id_registro = registro[0]
-        saida_almoco = registro[2]
-        volta_almoco = registro[3]
-        saida_final = registro[4]
-
-        if not saida_almoco:
-            cursor.execute(
-                sql("UPDATE registros SET saida_almoco=? WHERE id=?"),
-                (hora_atual, id_registro)
-            )
-        elif not volta_almoco:
-            cursor.execute(
-                sql("UPDATE registros SET volta_almoco=? WHERE id=?"),
-                (hora_atual, id_registro)
-            )
-        elif not saida_final:
-            cursor.execute(
-                sql("UPDATE registros SET saida_final=? WHERE id=?"),
-                (hora_atual, id_registro)
-            )
-        else:
-            cursor.execute(
-                sql("INSERT INTO registros (user_id, data, entrada_manha) VALUES (?, ?, ?)"),
-                (session["user_id"], hoje, hora_atual)
-            )
-
-    conn.commit()
+    registros_db = cursor.fetchall()
     conn.close()
 
-    return redirect("/dashboard")
+    registros: list[Dict[str, Any]] = []
+    for registro in registros_db:
+        total_linha = calcular_total_registro(registro)
+        saida_final = registro[6]
+        em_aberto = not bool(parse_hora(saida_final))
+        saldo_delta = None if em_aberto else calcular_saldo_dia(total_linha, esperado_min)
+        saldo_str = "em aberto" if em_aberto else (formatar_horas_minutos(saldo_delta) if saldo_delta is not None else "-")
+
+        registros.append(
+            {
+                "id": registro[0],
+                "data": registro[2],
+                "entrada_manha": registro[3],
+                "saida_almoco": registro[4],
+                "volta_almoco": registro[5],
+                "saida_final": registro[6],
+                "total_seconds": int(total_linha.total_seconds()),
+                "saldo": saldo_str,
+                "em_aberto": em_aberto,
+            }
+        )
+
+    return api_ok({"registros": registros})
+
+
+@app.route("/api/ponto", methods=["POST"])
+def api_registrar_ponto():
+    erro = exigir_login_api()
+    if erro:
+        return erro
+
+    resultado = registrar_ponto(session["user_id"], agora())
+    return api_ok({"ponto": resultado}, 201)
+
+
+@app.route("/api/registros/<int:registro_id>", methods=["DELETE"])
+def api_excluir_registro(registro_id: int):
+    erro = exigir_login_api()
+    if erro:
+        return erro
+
+    if not excluir_registro_usuario(session["user_id"], registro_id):
+        return api_erro("Registro não encontrado", 404)
+    return api_ok({"deleted_id": registro_id})
+
+
+@app.route("/api/account", methods=["DELETE"])
+def api_excluir_conta():
+    erro = exigir_login_api()
+    if erro:
+        return erro
+
+    dados = request.get_json(silent=True) or {}
+    confirmacao = (dados.get("confirmacao") or "").strip()
+    if confirmacao != "EXCLUIR":
+        return api_erro("Confirmação inválida. Envie confirmacao=EXCLUIR.", 400)
+
+    user_id = session["user_id"]
+    excluir_conta_usuario(user_id)
+    session.clear()
+
+    return api_ok({"deleted": True})
 
 
 @app.route("/logout")

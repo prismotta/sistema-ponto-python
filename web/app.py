@@ -733,6 +733,17 @@ def dashboard():
         em_aberto = not bool(parse_hora(saida_final))
         saldo_delta = None if em_aberto else calcular_saldo_dia(total_linha, esperado_min)
         saldo_str = "em aberto" if em_aberto else (formatar_horas_minutos(saldo_delta) if saldo_delta is not None else "-")
+        saldo_css = ""
+        if em_aberto:
+            saldo_css = "text-muted"
+        elif saldo_delta is not None:
+            saldo_min = int(round(saldo_delta.total_seconds() / 60))
+            if saldo_min > 0:
+                saldo_css = "text-success"
+            elif saldo_min < 0:
+                saldo_css = "text-danger"
+            else:
+                saldo_css = "text-secondary"
 
         if not em_aberto:
             graf_labels.append(registro[2])
@@ -750,6 +761,7 @@ def dashboard():
             "total": total_linha,
             "esperado": timedelta(minutes=int(esperado_min)) if esperado_min is not None else None,
             "saldo": saldo_str,
+            "saldo_css": saldo_css,
         })
 
     # Status do dia (hoje) — baseado no total do dia e se existe registro em aberto

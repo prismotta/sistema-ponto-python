@@ -140,7 +140,7 @@
                             <td>{{ r.volta_almoco if r.volta_almoco else "-" }}</td>
                             <td>{{ r.saida_final if r.saida_final else "-" }}</td>
                             <td>{{ r.total }}</td>
-                            <td>{{ r.saldo }}</td>
+                            <td class="{{ r.saldo_css }}">{{ r.saldo }}</td>
                             <td class="text-center">
                                 <form method="POST" action="/registros/{{ r.id }}/excluir" onsubmit="return confirm('Tem certeza que deseja excluir este registro? Essa ação não pode ser desfeita.');" style="display:inline;">
                                     <button type="submit" class="btn btn-sm btn-danger">Excluir</button>

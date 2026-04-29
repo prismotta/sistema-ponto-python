@@ -922,6 +922,50 @@ def test_status_dia_jornada_incompleta(client):
     assert "Jornada incompleta".encode("utf-8") in resp.data
 
 
+def test_tabela_saldo_recebe_classe_por_sinal(client):
+    _criar_usuario_e_logar(client, "u1", "1234")
+    client.post("/perfil", data={"horas_diarias_esperadas": "8"}, follow_redirects=True)
+
+    hoje = datetime.now().strftime("%Y-%m-%d")
+    ontem = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+    anteontem = (datetime.now() - timedelta(days=2)).strftime("%Y-%m-%d")
+
+    conn = sqlite3.connect("web/database.db")
+    cursor = conn.cursor()
+    # +1h
+    cursor.execute(
+        """
+        INSERT INTO registros (user_id, data, entrada_manha, saida_almoco, volta_almoco, saida_final)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (1, anteontem, "08:00", "12:00", "13:00", "18:00"),
+    )
+    # -1h
+    cursor.execute(
+        """
+        INSERT INTO registros (user_id, data, entrada_manha, saida_almoco, volta_almoco, saida_final)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (1, ontem, "08:00", "12:00", "13:00", "16:00"),
+    )
+    # 0h
+    cursor.execute(
+        """
+        INSERT INTO registros (user_id, data, entrada_manha, saida_almoco, volta_almoco, saida_final)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (1, hoje, "08:00", "12:00", "13:00", "17:00"),
+    )
+    conn.commit()
+    conn.close()
+
+    resp = client.get("/dashboard")
+    assert resp.status_code == 200
+    assert b"class=\"text-success\">+1h 00m" in resp.data
+    assert b"class=\"text-danger\">-1h 00m" in resp.data
+    assert b"class=\"text-secondary\">+0h 00m" in resp.data
+
+
 def test_deletar_conta_apaga_registros_e_desloga(client):
     _criar_usuario_e_logar(client)
     client.get("/bater")

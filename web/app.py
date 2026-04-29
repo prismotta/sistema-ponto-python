@@ -786,6 +786,18 @@ def dashboard():
                 status_texto = "Jornada incompleta"
                 status_classe = "warning"
 
+    # Texto do botão de ponto (sem alterar a lógica da rota /bater)
+    botao_ponto_texto = "Registrar entrada"
+    if not registros_hoje:
+        botao_ponto_texto = "Registrar entrada"
+    else:
+        # Pega o registro mais recente do dia para decidir o estado
+        ultimo = sorted(registros_hoje, key=lambda r: r[0], reverse=True)[0]
+        if not ultimo[6]:
+            botao_ponto_texto = "Registrar saída"
+        else:
+            botao_ponto_texto = "Registrar novo ponto"
+
     return render_template(
         "dashboard.html",
         registros=registros,
@@ -801,6 +813,7 @@ def dashboard():
         status_dia_classe=status_classe,
         total_hoje_status=total_hoje_str,
         saldo_hoje_status=saldo_hoje_str,
+        botao_ponto_texto=botao_ponto_texto,
     )
 
 

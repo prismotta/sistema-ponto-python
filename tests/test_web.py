@@ -394,7 +394,7 @@ def test_dashboard_botao_registrar_ponto(client):
     _criar_usuario_e_logar(client)
     response = client.get("/dashboard")
     assert response.status_code == 200
-    assert b"Registrar Ponto" in response.data
+    assert "Registrar entrada".encode("utf-8") in response.data
 
 
 def test_api_sem_login_deve_falhar(client):
@@ -964,6 +964,50 @@ def test_tabela_saldo_recebe_classe_por_sinal(client):
     assert b"class=\"text-success\">+1h 00m" in resp.data
     assert b"class=\"text-danger\">-1h 00m" in resp.data
     assert b"class=\"text-secondary\">+0h 00m" in resp.data
+
+
+def test_botao_ponto_sem_registro_hoje_mostra_registrar_entrada(client):
+    _criar_usuario_e_logar(client, "u1", "1234")
+    resp = client.get("/dashboard")
+    assert resp.status_code == 200
+    assert "Registrar entrada".encode("utf-8") in resp.data
+
+
+def test_botao_ponto_com_entrada_mostra_registrar_saida(client):
+    _criar_usuario_e_logar(client, "u1", "1234")
+    hoje = datetime.now().strftime("%Y-%m-%d")
+    conn = sqlite3.connect("web/database.db")
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT INTO registros (user_id, data, entrada_manha) VALUES (?, ?, ?)",
+        (1, hoje, "08:00"),
+    )
+    conn.commit()
+    conn.close()
+
+    resp = client.get("/dashboard")
+    assert resp.status_code == 200
+    assert "Registrar saída".encode("utf-8") in resp.data
+
+
+def test_botao_ponto_com_jornada_finalizada_mostra_registrar_novo_ponto(client):
+    _criar_usuario_e_logar(client, "u1", "1234")
+    hoje = datetime.now().strftime("%Y-%m-%d")
+    conn = sqlite3.connect("web/database.db")
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        INSERT INTO registros (user_id, data, entrada_manha, saida_almoco, volta_almoco, saida_final)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (1, hoje, "08:00", "12:00", "13:00", "17:00"),
+    )
+    conn.commit()
+    conn.close()
+
+    resp = client.get("/dashboard")
+    assert resp.status_code == 200
+    assert "Registrar novo ponto".encode("utf-8") in resp.data
 
 
 def test_deletar_conta_apaga_registros_e_desloga(client):

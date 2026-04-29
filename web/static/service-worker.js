@@ -1,6 +1,6 @@
 /* Basic PWA service worker for Sistema de Ponto */
 
-const CACHE_NAME = "ponto-pwa-v1";
+const CACHE_NAME = "ponto-pwa-v2";
 const PRECACHE_URLS = [
   "/",
   "/manifest.json",
@@ -66,4 +66,3 @@ self.addEventListener("fetch", (event) => {
   // Default: try network, fallback to cache
   event.respondWith(fetch(request).catch(() => caches.match(request)));
 });
-

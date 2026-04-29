@@ -345,6 +345,21 @@ def test_calcular_saldo_extra_faltante_e_em_aberto(client):
     assert b"em aberto" in response.data
 
 
+def test_dashboard_exibe_nome_funcionario_ou_nao_informado(client):
+    _criar_usuario_e_logar(client)
+
+    # Sem nome no perfil
+    response = client.get("/dashboard")
+    assert response.status_code == 200
+    assert "Funcionário: não informado".encode("utf-8") in response.data
+
+    # Com nome no perfil
+    client.post("/perfil", data={"nome_funcionario": "Maria", "horas_diarias_esperadas": "8"}, follow_redirects=True)
+    response = client.get("/dashboard")
+    assert response.status_code == 200
+    assert "Funcionário: Maria".encode("utf-8") in response.data
+
+
 def test_deletar_conta_apaga_registros_e_desloga(client):
     _criar_usuario_e_logar(client)
     client.get("/bater")
@@ -368,4 +383,17 @@ def test_deletar_conta_apaga_registros_e_desloga(client):
 
     assert usuarios == 0
     assert registros == 0
+
+
+def test_flash_exclusao_conta_nao_persiste_para_outro_usuario(client):
+    _criar_usuario_e_logar(client, "u1", "1234")
+    response = client.post("/perfil/excluir-conta", data={"confirmacao": "EXCLUIR"}, follow_redirects=True)
+    assert response.status_code == 200
+    assert "Conta excluída com sucesso.".encode("utf-8") in response.data
+
+    # Criar e logar outro usuário não deve ver o flash antigo no dashboard
+    _criar_usuario_e_logar(client, "u2", "1234")
+    response_dashboard = client.get("/dashboard")
+    assert response_dashboard.status_code == 200
+    assert "Conta excluída com sucesso.".encode("utf-8") not in response_dashboard.data
 

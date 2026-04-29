@@ -420,6 +420,7 @@ def dashboard():
     esperado_min = perfil.get("horas_diarias_esperadas_min")
     if esperado_min is None:
         esperado_min = 8 * 60
+    nome_funcionario = perfil.get("nome_funcionario") or "não informado"
 
     cursor.execute(
         sql("""
@@ -463,7 +464,7 @@ def dashboard():
         "dashboard.html",
         registros=registros,
         total_hoje=total_hoje,
-        esperado_diario=timedelta(minutes=int(esperado_min)) if esperado_min is not None else None,
+        nome_funcionario=nome_funcionario,
     )
 
 

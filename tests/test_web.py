@@ -973,7 +973,7 @@ def test_botao_ponto_sem_registro_hoje_mostra_registrar_entrada(client):
     assert "Registrar entrada".encode("utf-8") in resp.data
 
 
-def test_botao_ponto_com_entrada_mostra_registrar_saida(client):
+def test_botao_ponto_com_entrada_sem_saida_almoco_mostra_saida_almoco(client):
     _criar_usuario_e_logar(client, "u1", "1234")
     hoje = datetime.now().strftime("%Y-%m-%d")
     conn = sqlite3.connect("web/database.db")
@@ -987,10 +987,50 @@ def test_botao_ponto_com_entrada_mostra_registrar_saida(client):
 
     resp = client.get("/dashboard")
     assert resp.status_code == 200
-    assert "Registrar saída".encode("utf-8") in resp.data
+    assert "Registrar saída almoço".encode("utf-8") in resp.data
 
 
-def test_botao_ponto_com_jornada_finalizada_mostra_registrar_novo_ponto(client):
+def test_botao_ponto_com_saida_almoco_sem_volta_mostra_volta_almoco(client):
+    _criar_usuario_e_logar(client, "u1", "1234")
+    hoje = datetime.now().strftime("%Y-%m-%d")
+    conn = sqlite3.connect("web/database.db")
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        INSERT INTO registros (user_id, data, entrada_manha, saida_almoco)
+        VALUES (?, ?, ?, ?)
+        """,
+        (1, hoje, "08:00", "12:00"),
+    )
+    conn.commit()
+    conn.close()
+
+    resp = client.get("/dashboard")
+    assert resp.status_code == 200
+    assert "Registrar volta almoço".encode("utf-8") in resp.data
+
+
+def test_botao_ponto_com_volta_almoco_sem_saida_final_mostra_saida_final(client):
+    _criar_usuario_e_logar(client, "u1", "1234")
+    hoje = datetime.now().strftime("%Y-%m-%d")
+    conn = sqlite3.connect("web/database.db")
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        INSERT INTO registros (user_id, data, entrada_manha, saida_almoco, volta_almoco)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (1, hoje, "08:00", "12:00", "13:00"),
+    )
+    conn.commit()
+    conn.close()
+
+    resp = client.get("/dashboard")
+    assert resp.status_code == 200
+    assert "Registrar saída final".encode("utf-8") in resp.data
+
+
+def test_botao_ponto_com_saida_final_mostra_registrar_novo_ponto(client):
     _criar_usuario_e_logar(client, "u1", "1234")
     hoje = datetime.now().strftime("%Y-%m-%d")
     conn = sqlite3.connect("web/database.db")

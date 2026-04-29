@@ -787,14 +787,24 @@ def dashboard():
                 status_classe = "warning"
 
     # Texto do botão de ponto (sem alterar a lógica da rota /bater)
+    # Ordem do registro: (id, user_id, data, entrada_manha, saida_almoco, volta_almoco, saida_final)
     botao_ponto_texto = "Registrar entrada"
-    if not registros_hoje:
-        botao_ponto_texto = "Registrar entrada"
-    else:
-        # Pega o registro mais recente do dia para decidir o estado
+    if registros_hoje:
+        # Pega o registro mais recente do dia para decidir o próximo passo
         ultimo = sorted(registros_hoje, key=lambda r: r[0], reverse=True)[0]
-        if not ultimo[6]:
-            botao_ponto_texto = "Registrar saída"
+        entrada_manha = ultimo[3]
+        saida_almoco = ultimo[4]
+        volta_almoco = ultimo[5]
+        saida_final = ultimo[6]
+
+        if not entrada_manha:
+            botao_ponto_texto = "Registrar entrada"
+        elif not saida_almoco:
+            botao_ponto_texto = "Registrar saída almoço"
+        elif not volta_almoco:
+            botao_ponto_texto = "Registrar volta almoço"
+        elif not saida_final:
+            botao_ponto_texto = "Registrar saída final"
         else:
             botao_ponto_texto = "Registrar novo ponto"
 

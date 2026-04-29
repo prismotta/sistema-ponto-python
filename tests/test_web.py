@@ -239,6 +239,7 @@ def test_salvar_perfil(client):
         "/perfil",
         data={
             "nome_funcionario": "João da Silva",
+            "nome_exibicao": "João",
             "nome_empresa": "Empresa X",
             "horas_diarias_esperadas": "08:30",
         },
@@ -248,11 +249,11 @@ def test_salvar_perfil(client):
 
     conn = sqlite3.connect("web/database.db")
     cursor = conn.cursor()
-    cursor.execute("SELECT nome_funcionario, nome_empresa, horas_diarias_esperadas_min FROM usuarios WHERE id=1")
+    cursor.execute("SELECT nome_funcionario, nome_exibicao, nome_empresa, horas_diarias_esperadas_min FROM usuarios WHERE id=1")
     row = cursor.fetchone()
     conn.close()
 
-    assert row == ("João da Silva", "Empresa X", 8 * 60 + 30)
+    assert row == ("João da Silva", "João", "Empresa X", 8 * 60 + 30)
 
 
 def test_deletar_registro_so_afeta_usuario_logado(client):
@@ -358,6 +359,39 @@ def test_dashboard_exibe_nome_funcionario_ou_nao_informado(client):
     response = client.get("/dashboard")
     assert response.status_code == 200
     assert "Funcionário: Maria".encode("utf-8") in response.data
+
+
+def test_dashboard_prioriza_nome_exibicao(client):
+    _criar_usuario_e_logar(client)
+    client.post(
+        "/perfil",
+        data={"nome_funcionario": "Priscila F. Motta", "nome_exibicao": "Pri", "horas_diarias_esperadas": "8"},
+        follow_redirects=True,
+    )
+
+    response = client.get("/dashboard")
+    assert response.status_code == 200
+    assert "Funcionário: Pri".encode("utf-8") in response.data
+
+
+def test_dashboard_usa_primeiro_nome_quando_nome_exibicao_vazio(client):
+    _criar_usuario_e_logar(client)
+    client.post(
+        "/perfil",
+        data={"nome_funcionario": "Priscila F. Motta", "nome_exibicao": "", "horas_diarias_esperadas": "8"},
+        follow_redirects=True,
+    )
+
+    response = client.get("/dashboard")
+    assert response.status_code == 200
+    assert "Funcionário: Priscila".encode("utf-8") in response.data
+
+
+def test_dashboard_botao_registrar_ponto(client):
+    _criar_usuario_e_logar(client)
+    response = client.get("/dashboard")
+    assert response.status_code == 200
+    assert b"Registrar Ponto" in response.data
 
 
 def test_deletar_conta_apaga_registros_e_desloga(client):

@@ -102,6 +102,7 @@ def criar_banco() -> None:
                 username TEXT UNIQUE NOT NULL,
                 password TEXT NOT NULL,
                 nome_funcionario TEXT,
+                nome_exibicao TEXT,
                 nome_empresa TEXT,
                 horas_diarias_esperadas_min INTEGER
             )
@@ -124,6 +125,7 @@ def criar_banco() -> None:
 
         # Migração: adiciona colunas do perfil em bases antigas
         cursor.execute("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS nome_funcionario TEXT")
+        cursor.execute("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS nome_exibicao TEXT")
         cursor.execute("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS nome_empresa TEXT")
         cursor.execute("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS horas_diarias_esperadas_min INTEGER")
     else:
@@ -133,6 +135,7 @@ def criar_banco() -> None:
                 username TEXT UNIQUE NOT NULL,
                 password TEXT NOT NULL,
                 nome_funcionario TEXT,
+                nome_exibicao TEXT,
                 nome_empresa TEXT,
                 horas_diarias_esperadas_min INTEGER
             )
@@ -168,6 +171,7 @@ def criar_banco() -> None:
         colunas_usuarios = {row[1] for row in cursor.fetchall()}
         for coluna, tipo in (
             ("nome_funcionario", "TEXT"),
+            ("nome_exibicao", "TEXT"),
             ("nome_empresa", "TEXT"),
             ("horas_diarias_esperadas_min", "INTEGER"),
         ):
@@ -226,7 +230,7 @@ def obter_perfil_usuario(user_id: int) -> Dict[str, Any]:
     cursor = conn.cursor()
     cursor.execute(
         sql("""
-            SELECT nome_funcionario, nome_empresa, horas_diarias_esperadas_min
+            SELECT nome_funcionario, nome_exibicao, nome_empresa, horas_diarias_esperadas_min
             FROM usuarios
             WHERE id=?
         """),
@@ -236,9 +240,16 @@ def obter_perfil_usuario(user_id: int) -> Dict[str, Any]:
     conn.close()
 
     if not row:
-        return {"nome_funcionario": None, "nome_empresa": None, "horas_diarias_esperadas_min": None}
+        return {"nome_funcionario": None, "nome_exibicao": None, "nome_empresa": None, "horas_diarias_esperadas_min": None}
 
-    return {"nome_funcionario": row[0], "nome_empresa": row[1], "horas_diarias_esperadas_min": row[2]}
+    return {"nome_funcionario": row[0], "nome_exibicao": row[1], "nome_empresa": row[2], "horas_diarias_esperadas_min": row[3]}
+
+
+def primeiro_nome(nome: Optional[str]) -> Optional[str]:
+    if not nome:
+        return None
+    partes = [p for p in nome.strip().split() if p]
+    return partes[0] if partes else None
 
 
 def parse_horas_esperadas_min(valor: Optional[str]) -> Optional[int]:
@@ -420,7 +431,13 @@ def dashboard():
     esperado_min = perfil.get("horas_diarias_esperadas_min")
     if esperado_min is None:
         esperado_min = 8 * 60
-    nome_funcionario = perfil.get("nome_funcionario") or "não informado"
+    nome_exibicao = (perfil.get("nome_exibicao") or "").strip()
+    nome_funcionario = (perfil.get("nome_funcionario") or "").strip()
+    nome_dashboard = (
+        nome_exibicao
+        or (primeiro_nome(nome_funcionario) or "")
+        or "não informado"
+    )
 
     cursor.execute(
         sql("""
@@ -464,7 +481,7 @@ def dashboard():
         "dashboard.html",
         registros=registros,
         total_hoje=total_hoje,
-        nome_funcionario=nome_funcionario,
+        nome_funcionario=nome_dashboard,
     )
 
 
@@ -475,6 +492,7 @@ def perfil():
 
     if request.method == "POST":
         nome_funcionario = (request.form.get("nome_funcionario") or "").strip() or None
+        nome_exibicao = (request.form.get("nome_exibicao") or "").strip() or None
         nome_empresa = (request.form.get("nome_empresa") or "").strip() or None
         horas_texto = request.form.get("horas_diarias_esperadas") or ""
 
@@ -488,10 +506,10 @@ def perfil():
         cursor.execute(
             sql("""
                 UPDATE usuarios
-                SET nome_funcionario=?, nome_empresa=?, horas_diarias_esperadas_min=?
+                SET nome_funcionario=?, nome_exibicao=?, nome_empresa=?, horas_diarias_esperadas_min=?
                 WHERE id=?
             """),
-            (nome_funcionario, nome_empresa, horas_min, session["user_id"]),
+            (nome_funcionario, nome_exibicao, nome_empresa, horas_min, session["user_id"]),
         )
         conn.commit()
         conn.close()

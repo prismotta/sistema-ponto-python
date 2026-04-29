@@ -30,12 +30,9 @@
       {% endif %}
     {% endwith %}
 
-    <div class="card shadow-sm mb-4">
-        <div class="card-body text-center">
-            <h5 class="card-title">Registrar Ponto</h5>
-            <p class="mb-3">Funcionário: {{ nome_funcionario }}</p>
-            <a href="/bater" class="btn btn-primary btn-lg">Bater Ponto</a>
-        </div>
+    <div class="mb-4">
+        <p class="mb-2">Funcionário: {{ nome_funcionario }}</p>
+        <a href="/bater" class="btn btn-primary">Registrar Ponto</a>
     </div>
 
     <div class="card shadow-sm">

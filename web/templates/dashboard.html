@@ -35,6 +35,35 @@
         <a href="/bater" class="btn btn-primary">Registrar Ponto</a>
     </div>
 
+    {% if graf_labels and graf_horas and graf_saldo %}
+    <div class="row g-3 mb-4">
+        <div class="col-12 col-lg-6">
+            <div class="card shadow-sm">
+                <div class="card-body">
+                    <h6 class="card-title mb-3">Horas trabalhadas por dia</h6>
+                    <div style="height: 280px;">
+                        <canvas id="grafHoras"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-12 col-lg-6">
+            <div class="card shadow-sm">
+                <div class="card-body">
+                    <h6 class="card-title mb-3">Saldo do dia (extra/faltante)</h6>
+                    <div style="height: 280px;">
+                        <canvas id="grafSaldo"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% else %}
+    <div class="alert alert-secondary mb-4">
+        Ainda não há dados suficientes para gerar gráficos.
+    </div>
+    {% endif %}
+
     <div class="card shadow-sm">
         <div class="card-body">
             <div class="table-responsive">
@@ -77,5 +106,56 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<script>
+  const labels = {{ graf_labels | tojson }};
+  const horas = {{ graf_horas | tojson }};
+  const saldo = {{ graf_saldo | tojson }};
+
+  if (labels && labels.length) {
+    new Chart(document.getElementById('grafHoras'), {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [{
+          label: 'Horas trabalhadas',
+          data: horas,
+          backgroundColor: 'rgba(13, 110, 253, 0.35)',
+          borderColor: 'rgba(13, 110, 253, 1)',
+          borderWidth: 1,
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+          y: { beginAtZero: true, title: { display: true, text: 'Horas' } }
+        }
+      }
+    });
+
+    new Chart(document.getElementById('grafSaldo'), {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [{
+          label: 'Saldo (h)',
+          data: saldo,
+          tension: 0.25,
+          borderColor: 'rgba(25, 135, 84, 1)',
+          backgroundColor: 'rgba(25, 135, 84, 0.15)',
+          fill: true,
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+          y: { title: { display: true, text: 'Horas' } }
+        }
+      }
+    });
+  }
+</script>
 </body>
 </html>

@@ -434,6 +434,10 @@ def calcular_saldo_dia(total_trabalhado: timedelta, esperado_min: Optional[int])
     return total_trabalhado - timedelta(minutes=int(esperado_min))
 
 
+def horas_decimal(delta: timedelta) -> float:
+    return round(delta.total_seconds() / 3600, 2)
+
+
 def calcular_total_registro(registro: Tuple[Any, ...]) -> timedelta:
     """
     Calcula o total trabalhado de um registro.
@@ -585,6 +589,9 @@ def dashboard():
 
     registros = []
     total_hoje = timedelta()
+    graf_labels: list[str] = []
+    graf_horas: list[float] = []
+    graf_saldo: list[float] = []
 
     for registro in registros_db:
         total_linha = calcular_total_registro(registro)
@@ -595,6 +602,11 @@ def dashboard():
         em_aberto = not bool(parse_hora(saida_final))
         saldo_delta = None if em_aberto else calcular_saldo_dia(total_linha, esperado_min)
         saldo_str = "em aberto" if em_aberto else (formatar_horas_minutos(saldo_delta) if saldo_delta is not None else "-")
+
+        if not em_aberto:
+            graf_labels.append(registro[2])
+            graf_horas.append(horas_decimal(total_linha))
+            graf_saldo.append(horas_decimal(saldo_delta or timedelta()))
 
         registros.append({
             "id": registro[0],
@@ -613,6 +625,9 @@ def dashboard():
         registros=registros,
         total_hoje=total_hoje,
         nome_funcionario=nome_dashboard,
+        graf_labels=graf_labels,
+        graf_horas=graf_horas,
+        graf_saldo=graf_saldo,
     )
 
 

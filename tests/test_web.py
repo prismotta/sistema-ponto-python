@@ -493,6 +493,52 @@ def test_api_deletar_conta_logada(client):
     assert resp2.status_code == 401
 
 
+def test_dashboard_sem_registros_mostra_mensagem_graficos(client):
+    _criar_usuario_e_logar(client)
+    response = client.get("/dashboard")
+    assert response.status_code == 200
+    assert "Ainda não há dados suficientes para gerar gráficos.".encode("utf-8") in response.data
+
+
+def test_dashboard_graficos_apenas_do_usuario_logado(client):
+    _criar_usuario_e_logar(client, "u1", "1234")
+
+    # Insere registro finalizado para u1
+    conn = sqlite3.connect("web/database.db")
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        INSERT INTO registros (user_id, data, entrada_manha, saida_almoco, volta_almoco, saida_final)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (1, "2026-01-01", "08:00", "12:00", "13:00", "17:00"),
+    )
+    conn.commit()
+    conn.close()
+
+    client.get("/logout")
+    _criar_usuario_e_logar(client, "u2", "1234")
+
+    # Insere registro finalizado para u2
+    conn = sqlite3.connect("web/database.db")
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        INSERT INTO registros (user_id, data, entrada_manha, saida_almoco, volta_almoco, saida_final)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (2, "2026-02-02", "08:00", "12:00", "13:00", "18:00"),
+    )
+    conn.commit()
+    conn.close()
+
+    response = client.get("/dashboard")
+    assert response.status_code == 200
+    # Deve conter apenas a data do usuário logado (u2)
+    assert b"2026-02-02" in response.data
+    assert b"2026-01-01" not in response.data
+
+
 def test_deletar_conta_apaga_registros_e_desloga(client):
     _criar_usuario_e_logar(client)
     client.get("/bater")

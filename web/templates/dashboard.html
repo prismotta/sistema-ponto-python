@@ -36,7 +36,10 @@
 
     <div class="mb-3 mb-md-4">
         <p class="mb-2">Funcionário: {{ nome_funcionario }}</p>
-        <a href="/bater" class="btn btn-primary btn-lg w-100 w-sm-auto">{{ botao_ponto_texto }}</a>
+        <a href="/bater" class="btn btn-primary btn-lg d-inline-flex align-items-center justify-content-center gap-2 px-4 w-100 w-sm-auto" style="max-width: 420px;">
+            <span aria-hidden="true">⏱️</span>
+            <span>{{ botao_ponto_texto }}</span>
+        </a>
     </div>
 
     <div class="card shadow-sm mb-3 mb-md-4">

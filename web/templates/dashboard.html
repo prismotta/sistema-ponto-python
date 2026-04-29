@@ -9,6 +9,12 @@
     <style>
       .table-responsive { -webkit-overflow-scrolling: touch; }
       .table td, .table th { white-space: nowrap; }
+      .btn-ponto { max-width: 380px; font-size: 1rem; }
+      .btn-ponto .btn-ponto-icone { font-size: 1.05em; }
+      @media (max-width: 768px) {
+        .btn-ponto { max-width: 100%; font-size: 1.15rem; }
+        .btn-ponto .btn-ponto-icone { font-size: 1.15em; }
+      }
     </style>
 </head>
 <body class="bg-light">
@@ -38,8 +44,8 @@
 
     <div class="mb-3 mb-md-4">
         <p class="mb-2">Funcionário: {{ nome_funcionario }}</p>
-        <a href="/bater" class="btn btn-primary d-inline-flex align-items-center justify-content-center gap-2 px-3 py-2 px-sm-4 py-sm-2 w-100 w-sm-auto" style="max-width: 380px; font-size: 1rem;">
-            <span aria-hidden="true">⏱️</span>
+        <a href="/bater" class="btn btn-primary btn-ponto d-inline-flex align-items-center justify-content-center gap-2 px-3 py-2 px-sm-4 py-sm-2 w-100 w-sm-auto">
+            <span class="btn-ponto-icone" aria-hidden="true">⏱️</span>
             <span>{{ botao_ponto_texto }}</span>
         </a>
     </div>

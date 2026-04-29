@@ -45,11 +45,11 @@ O projeto evoluiu de uma versão CLI para interface gráfica e, posteriormente, 
 ```
 sistema-ponto/
 │
-├── src/                # Lógica de negócio (CLI)
+├── src/                # Módulo legado (CLI/CSV)
 │   ├── registro.py
 │   └── utils.py
 │
-├── web/                # Aplicação Flask
+├── web/                # Aplicação Flask (banco de dados)
 │   ├── app.py
 │   ├── templates/
 │   └── database.db
@@ -69,8 +69,8 @@ sistema-ponto/
 ## Decisões Técnicas
 
 ### Separação de camadas
-- `src/` contém apenas regra de negócio.
-- `web/` contém camada HTTP e persistência.
+- `src/` contém apenas o fluxo legado CLI/GUI baseado em CSV (mantido para referência e testes).
+- `web/` contém a aplicação web Flask e usa **apenas banco de dados** (SQLite/PostgreSQL) como fonte de dados.
 - Código desacoplado para facilitar testes.
 
 ### Inversão de dependência
@@ -185,3 +185,4 @@ Demonstrar:
 ## Autoria
 
 Projeto desenvolvido como parte da preparação para atuação como QA / QA Automation.
+

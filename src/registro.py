@@ -2,6 +2,17 @@ import csv
 from datetime import datetime
 
 
+"""
+MÓDULO LEGADO (CSV)
+
+Este módulo é usado apenas pela versão CLI/GUI (main.py/gui.py) e pelos testes
+unitários em tests/test_registro.py.
+
+A aplicação web (web/app.py) usa exclusivamente banco de dados (SQLite/PostgreSQL)
+e não importa este módulo.
+"""
+
+
 def bater_entrada(arquivo):
     agora = datetime.now()
     data = agora.strftime("%d/%m/%Y")

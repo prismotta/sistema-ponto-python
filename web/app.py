@@ -116,7 +116,8 @@ def criar_banco() -> None:
                 nome_funcionario TEXT,
                 nome_exibicao TEXT,
                 nome_empresa TEXT,
-                horas_diarias_esperadas_min INTEGER
+                horas_diarias_esperadas_min INTEGER,
+                role TEXT NOT NULL DEFAULT 'user'
             )
         """)
         cursor.execute("""
@@ -140,6 +141,7 @@ def criar_banco() -> None:
         cursor.execute("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS nome_exibicao TEXT")
         cursor.execute("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS nome_empresa TEXT")
         cursor.execute("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS horas_diarias_esperadas_min INTEGER")
+        cursor.execute("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'user'")
     else:
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS usuarios (
@@ -149,7 +151,8 @@ def criar_banco() -> None:
                 nome_funcionario TEXT,
                 nome_exibicao TEXT,
                 nome_empresa TEXT,
-                horas_diarias_esperadas_min INTEGER
+                horas_diarias_esperadas_min INTEGER,
+                role TEXT NOT NULL DEFAULT 'user'
             )
         """)
         cursor.execute("""
@@ -186,6 +189,7 @@ def criar_banco() -> None:
             ("nome_exibicao", "TEXT"),
             ("nome_empresa", "TEXT"),
             ("horas_diarias_esperadas_min", "INTEGER"),
+            ("role", "TEXT NOT NULL DEFAULT 'user'"),
         ):
             if coluna not in colunas_usuarios:
                 try:
@@ -235,6 +239,11 @@ def usuario_logado() -> bool:
     Verifica se existe usuário autenticado na sessão.
     """
     return "user_id" in session
+
+
+def usuario_atual_id() -> Optional[int]:
+    user_id = session.get("user_id")
+    return int(user_id) if user_id is not None else None
 
 
 def api_erro(mensagem: str, status_code: int = 400):
@@ -288,6 +297,66 @@ def obter_perfil_usuario(user_id: int) -> Dict[str, Any]:
         return {"nome_funcionario": None, "nome_exibicao": None, "nome_empresa": None, "horas_diarias_esperadas_min": None}
 
     return {"nome_funcionario": row[0], "nome_exibicao": row[1], "nome_empresa": row[2], "horas_diarias_esperadas_min": row[3]}
+
+
+def obter_usuario(user_id: int) -> Optional[Dict[str, Any]]:
+    conn = conectar()
+    cursor = conn.cursor()
+    cursor.execute(
+        sql("""
+            SELECT id, username, nome_funcionario, nome_exibicao, nome_empresa, horas_diarias_esperadas_min, role
+            FROM usuarios
+            WHERE id=?
+        """),
+        (user_id,),
+    )
+    row = cursor.fetchone()
+    conn.close()
+
+    if not row:
+        return None
+
+    return {
+        "id": row[0],
+        "username": row[1],
+        "nome_funcionario": row[2],
+        "nome_exibicao": row[3],
+        "nome_empresa": row[4],
+        "horas_diarias_esperadas_min": row[5],
+        "role": row[6] or "user",
+    }
+
+
+def usuario_eh_admin(user_id: Optional[int] = None) -> bool:
+    alvo_id = user_id if user_id is not None else usuario_atual_id()
+    if alvo_id is None:
+        return False
+    usuario = obter_usuario(alvo_id)
+    return bool(usuario and usuario.get("role") == "admin")
+
+
+def empresa_normalizada(usuario: Optional[Dict[str, Any]]) -> str:
+    if not usuario:
+        return ""
+    return (usuario.get("nome_empresa") or "").strip()
+
+
+def nome_usuario_para_exibicao(usuario: Dict[str, Any]) -> str:
+    nome_exibicao = (usuario.get("nome_exibicao") or "").strip()
+    nome_funcionario = (usuario.get("nome_funcionario") or "").strip()
+    username = (usuario.get("username") or "").strip()
+    return nome_exibicao or nome_funcionario or username or "nÃ£o informado"
+
+
+def admin_pode_acessar_funcionario(admin_id: int, funcionario_id: int) -> bool:
+    admin = obter_usuario(admin_id)
+    funcionario = obter_usuario(funcionario_id)
+    if not admin or not funcionario:
+        return False
+    if admin.get("role") != "admin" or funcionario.get("role") != "user":
+        return False
+    empresa_admin = empresa_normalizada(admin)
+    return bool(empresa_admin) and empresa_admin == empresa_normalizada(funcionario)
 
 
 def primeiro_nome(nome: Optional[str]) -> Optional[str]:
@@ -570,6 +639,81 @@ def calcular_total_registro(registro: Tuple[Any, ...]) -> timedelta:
     return total
 
 
+def buscar_registros_usuario(user_id: int, data_inicio: Optional[str] = None, data_fim: Optional[str] = None) -> list[Tuple[Any, ...]]:
+    conn = conectar()
+    cursor = conn.cursor()
+    sql_query, params_extra = aplicar_filtro_periodo_sql(
+        """
+            SELECT id, user_id, data, entrada_manha, saida_almoco, volta_almoco, saida_final
+            FROM registros
+            WHERE user_id=?
+        """,
+        data_inicio,
+        data_fim,
+    )
+    sql_query += "\n            ORDER BY data DESC, id DESC"
+    cursor.execute(sql(sql_query), (user_id,) + params_extra)
+    registros = cursor.fetchall()
+    conn.close()
+    return registros
+
+
+def calcular_banco_registros(registros_db: list[Tuple[Any, ...]], esperado_min: int) -> timedelta:
+    banco = timedelta()
+    for registro in registros_db:
+        if not parse_hora(registro[6]):
+            continue
+        saldo = calcular_saldo_dia(calcular_total_registro(registro), esperado_min)
+        if saldo is not None:
+            banco += saldo
+    return banco
+
+
+def montar_registros_para_tabela(registros_db: list[Tuple[Any, ...]], esperado_min: int) -> list[Dict[str, Any]]:
+    registros = []
+    for registro in registros_db:
+        total_linha = calcular_total_registro(registro)
+        em_aberto = not bool(parse_hora(registro[6]))
+        saldo_delta = None if em_aberto else calcular_saldo_dia(total_linha, esperado_min)
+        saldo_str = "em aberto" if em_aberto else (formatar_horas_minutos(saldo_delta) if saldo_delta is not None else "-")
+        saldo_css = ""
+        if em_aberto:
+            saldo_css = "text-muted"
+        elif saldo_delta is not None:
+            saldo_min = int(round(saldo_delta.total_seconds() / 60))
+            if saldo_min > 0:
+                saldo_css = "text-success"
+            elif saldo_min < 0:
+                saldo_css = "text-danger"
+            else:
+                saldo_css = "text-secondary"
+
+        registros.append(
+            {
+                "id": registro[0],
+                "data": registro[2],
+                "entrada": registro[3],
+                "saida_almoco": registro[4],
+                "volta_almoco": registro[5],
+                "saida_final": registro[6],
+                "total": total_linha,
+                "saldo": saldo_str,
+                "saldo_css": saldo_css,
+            }
+        )
+    return registros
+
+
+def periodo_para_texto(data_inicio: Optional[str], data_fim: Optional[str], prefixo: str = "PerÃ­odo") -> str:
+    if data_inicio and data_fim:
+        return f"{prefixo}: {datetime.strptime(data_inicio, '%Y-%m-%d').strftime('%d/%m/%Y')} atÃ© {datetime.strptime(data_fim, '%Y-%m-%d').strftime('%d/%m/%Y')}"
+    if data_inicio:
+        return f"{prefixo}: a partir de {datetime.strptime(data_inicio, '%Y-%m-%d').strftime('%d/%m/%Y')}"
+    if data_fim:
+        return f"{prefixo}: atÃ© {datetime.strptime(data_fim, '%Y-%m-%d').strftime('%d/%m/%Y')}"
+    return f"{prefixo}: todos os registros"
+
+
 # ==========================================================
 # ROTAS
 # ==========================================================
@@ -585,6 +729,11 @@ def garantir_banco():
             return
         criar_banco()
         _db_init_done = True
+
+
+@app.context_processor
+def contexto_usuario():
+    return {"usuario_admin": usuario_eh_admin()}
 
 
 @app.route("/", methods=["GET", "POST"])
@@ -849,6 +998,227 @@ def dashboard():
         saldo_hoje_status=saldo_hoje_str,
         botao_ponto_texto=botao_ponto_texto,
     )
+
+
+@app.route("/admin")
+def admin_dashboard():
+    if not usuario_logado():
+        return redirect("/")
+    admin_id = session["user_id"]
+    admin = obter_usuario(admin_id)
+    if not admin or admin.get("role") != "admin":
+        flash_erro("Acesso restrito a administradores.")
+        return redirect("/dashboard")
+
+    empresa_admin = empresa_normalizada(admin)
+    conn = conectar()
+    cursor = conn.cursor()
+    cursor.execute(
+        sql("""
+            SELECT id, username, nome_funcionario, nome_exibicao, nome_empresa, horas_diarias_esperadas_min, role
+            FROM usuarios
+            WHERE role='user' AND COALESCE(nome_empresa, '')=?
+            ORDER BY COALESCE(nome_funcionario, username), username
+        """),
+        (empresa_admin,),
+    )
+    funcionarios_db = cursor.fetchall()
+    conn.close()
+
+    mes_inicio, mes_fim = limites_mes_atual_iso()
+    funcionarios = []
+    for row in funcionarios_db:
+        funcionario = {
+            "id": row[0],
+            "username": row[1],
+            "nome_funcionario": row[2],
+            "nome_exibicao": row[3],
+            "nome_empresa": row[4],
+            "horas_diarias_esperadas_min": row[5],
+            "role": row[6] or "user",
+        }
+        esperado_min = funcionario.get("horas_diarias_esperadas_min") or 8 * 60
+        registros_mes = buscar_registros_usuario(funcionario["id"], mes_inicio, mes_fim)
+        todos_registros = buscar_registros_usuario(funcionario["id"])
+        funcionarios.append(
+            {
+                "id": funcionario["id"],
+                "nome": nome_usuario_para_exibicao(funcionario),
+                "empresa": empresa_normalizada(funcionario) or "-",
+                "total_registros": len(todos_registros),
+                "banco_mes_atual": formatar_banco_horas(calcular_banco_registros(registros_mes, esperado_min)),
+            }
+        )
+
+    return render_template(
+        "admin.html",
+        funcionarios=funcionarios,
+        empresa_admin=empresa_admin or "-",
+    )
+
+
+@app.route("/admin/funcionarios/<int:funcionario_id>")
+def admin_funcionario(funcionario_id: int):
+    if not usuario_logado():
+        return redirect("/")
+    admin_id = session["user_id"]
+    if not admin_pode_acessar_funcionario(admin_id, funcionario_id):
+        flash_erro("FuncionÃ¡rio nÃ£o encontrado para esta empresa.")
+        return redirect("/admin" if usuario_eh_admin(admin_id) else "/dashboard")
+
+    data_inicio_raw = request.args.get("data_inicio")
+    data_fim_raw = request.args.get("data_fim")
+    data_inicio, data_fim, erro_periodo = validar_periodo(data_inicio_raw, data_fim_raw)
+    if erro_periodo:
+        flash_erro(erro_periodo)
+        qs = ""
+        if data_inicio_raw or data_fim_raw:
+            qs = f"?data_inicio={data_inicio_raw or ''}&data_fim={data_fim_raw or ''}"
+        return redirect(f"/admin/funcionarios/{funcionario_id}" + qs)
+
+    funcionario = obter_usuario(funcionario_id)
+    if not funcionario:
+        flash_erro("FuncionÃ¡rio nÃ£o encontrado.")
+        return redirect("/admin")
+
+    esperado_min = funcionario.get("horas_diarias_esperadas_min") or 8 * 60
+    registros_db = buscar_registros_usuario(funcionario_id, data_inicio, data_fim)
+    registros = montar_registros_para_tabela(registros_db, esperado_min)
+
+    return render_template(
+        "admin_funcionario.html",
+        funcionario=funcionario,
+        funcionario_nome=nome_usuario_para_exibicao(funcionario),
+        registros=registros,
+        data_inicio=data_inicio or "",
+        data_fim=data_fim or "",
+        banco_periodo=formatar_banco_horas(calcular_banco_registros(registros_db, esperado_min)),
+    )
+
+
+@app.route("/admin/funcionarios/<int:funcionario_id>/export/excel")
+def admin_export_excel(funcionario_id: int):
+    if not usuario_logado():
+        return redirect("/")
+    admin_id = session["user_id"]
+    if not admin_pode_acessar_funcionario(admin_id, funcionario_id):
+        flash_erro("FuncionÃ¡rio nÃ£o encontrado para esta empresa.")
+        return redirect("/admin" if usuario_eh_admin(admin_id) else "/dashboard")
+
+    data_inicio_raw = request.args.get("data_inicio")
+    data_fim_raw = request.args.get("data_fim")
+    data_inicio, data_fim, erro_periodo = validar_periodo(data_inicio_raw, data_fim_raw)
+    destino = f"/admin/funcionarios/{funcionario_id}"
+    if erro_periodo:
+        flash_erro(erro_periodo)
+        return redirect(destino)
+
+    funcionario = obter_usuario(funcionario_id)
+    if not funcionario:
+        flash_erro("FuncionÃ¡rio nÃ£o encontrado.")
+        return redirect("/admin")
+
+    esperado_min = funcionario.get("horas_diarias_esperadas_min") or 8 * 60
+    registros_db = buscar_registros_usuario(funcionario_id, data_inicio, data_fim)
+    if not registros_db:
+        flash_aviso("NÃ£o hÃ¡ registros no perÃ­odo selecionado para exportar.")
+        return redirect(destino)
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Registros"
+    ws.append([periodo_para_texto(data_inicio, data_fim)])
+    ws.append([f"FuncionÃ¡rio: {nome_usuario_para_exibicao(funcionario)}"])
+    ws.append([f"Empresa: {empresa_normalizada(funcionario) or '-'}"])
+    ws.append([])
+    headers = ["Data", "Entrada", "SaÃ­da AlmoÃ§o", "Volta AlmoÃ§o", "SaÃ­da Final", "Total Trabalhado", "Saldo do Dia"]
+    ws.append(headers)
+
+    for cell in ws[5]:
+        cell.font = Font(bold=True)
+
+    for registro in registros_db:
+        total_linha = calcular_total_registro(registro)
+        em_aberto = not bool(parse_hora(registro[6]))
+        saldo_delta = None if em_aberto else calcular_saldo_dia(total_linha, esperado_min)
+        saldo_str = "em aberto" if em_aberto else (formatar_horas_minutos(saldo_delta) if saldo_delta is not None else "-")
+        ws.append([registro[2], registro[3] or "", registro[4] or "", registro[5] or "", registro[6] or "", formatar_duracao_sem_sinal(total_linha), saldo_str])
+
+    ws.freeze_panes = "A6"
+    for col_idx, _ in enumerate(headers, start=1):
+        max_len = 0
+        for row in ws.iter_rows(min_col=col_idx, max_col=col_idx, values_only=True):
+            value = row[0]
+            if value is not None:
+                max_len = max(max_len, len(str(value)))
+        ws.column_dimensions[get_column_letter(col_idx)].width = min(max_len + 2, 40)
+
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+    return send_file(
+        output,
+        as_attachment=True,
+        download_name=f"registros_ponto_funcionario_{funcionario_id}.xlsx",
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+
+@app.route("/admin/funcionarios/<int:funcionario_id>/export/pdf")
+def admin_export_pdf(funcionario_id: int):
+    if not usuario_logado():
+        return redirect("/")
+    admin_id = session["user_id"]
+    if not admin_pode_acessar_funcionario(admin_id, funcionario_id):
+        flash_erro("FuncionÃ¡rio nÃ£o encontrado para esta empresa.")
+        return redirect("/admin" if usuario_eh_admin(admin_id) else "/dashboard")
+
+    data_inicio_raw = request.args.get("data_inicio")
+    data_fim_raw = request.args.get("data_fim")
+    data_inicio, data_fim, erro_periodo = validar_periodo(data_inicio_raw, data_fim_raw)
+    destino = f"/admin/funcionarios/{funcionario_id}"
+    if erro_periodo:
+        flash_erro(erro_periodo)
+        return redirect(destino)
+
+    funcionario = obter_usuario(funcionario_id)
+    if not funcionario:
+        flash_erro("FuncionÃ¡rio nÃ£o encontrado.")
+        return redirect("/admin")
+
+    esperado_min = funcionario.get("horas_diarias_esperadas_min") or 8 * 60
+    registros_db = buscar_registros_usuario(funcionario_id, data_inicio, data_fim)
+    if not registros_db:
+        flash_aviso("NÃ£o hÃ¡ registros no perÃ­odo selecionado para exportar.")
+        return redirect(destino)
+
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4, topMargin=18 * mm, bottomMargin=18 * mm, leftMargin=16 * mm, rightMargin=16 * mm, pageCompression=0, title="RelatÃ³rio de Ponto")
+    styles = getSampleStyleSheet()
+    styles.add(ParagraphStyle(name="TitleCenter", parent=styles["Title"], alignment=TA_CENTER))
+    story = [
+        Paragraph("RelatÃ³rio de Ponto", styles["TitleCenter"]),
+        Spacer(1, 4 * mm),
+        Paragraph(f"<b>FuncionÃ¡rio:</b> {nome_usuario_para_exibicao(funcionario)}", styles["Normal"]),
+        Paragraph(f"<b>Empresa:</b> {empresa_normalizada(funcionario) or '-'}", styles["Normal"]),
+        Paragraph(f"<b>{periodo_para_texto(data_inicio, data_fim)}</b>", styles["Normal"]),
+        Spacer(1, 5 * mm),
+    ]
+    data_table = [["Data", "Entrada", "SaÃ­da AlmoÃ§o", "Volta AlmoÃ§o", "SaÃ­da Final", "Total", "Saldo"]]
+    for registro in registros_db:
+        total_linha = calcular_total_registro(registro)
+        em_aberto = not bool(parse_hora(registro[6]))
+        saldo_delta = None if em_aberto else calcular_saldo_dia(total_linha, esperado_min)
+        saldo_str = "em aberto" if em_aberto else (formatar_horas_minutos(saldo_delta) if saldo_delta is not None else "-")
+        data_table.append([registro[2], registro[3] or "", registro[4] or "", registro[5] or "", registro[6] or "", formatar_duracao_sem_sinal(total_linha), saldo_str])
+
+    table = Table(data_table, repeatRows=1)
+    table.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1f2937")), ("TEXTCOLOR", (0, 0), (-1, 0), colors.white), ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#cbd5e1")), ("FONTSIZE", (0, 0), (-1, -1), 8)]))
+    story.append(table)
+    doc.build(story)
+
+    buffer.seek(0)
+    return send_file(buffer, as_attachment=True, download_name=f"registros_ponto_funcionario_{funcionario_id}.pdf", mimetype="application/pdf")
 
 
 @app.route("/perfil", methods=["GET", "POST"])

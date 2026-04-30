@@ -41,6 +41,13 @@ def test_login_valido(client):
     assert response.status_code == 302
     assert "/dashboard" in response.headers["Location"]
 
+    conn = sqlite3.connect("web/database.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT role FROM usuarios WHERE username=?", ("teste",))
+    role = cursor.fetchone()[0]
+    conn.close()
+    assert role == "user"
+
 def test_login_invalido(client):
     # Criar usuário válido
     client.post("/register", data={
@@ -236,6 +243,39 @@ def _criar_usuario_e_logar(client, username: str = "teste", password: str = "123
     client.post("/", data={"username": username, "password": password})
 
 
+def _definir_role(user_id: int, role: str):
+    conn = sqlite3.connect("web/database.db")
+    cursor = conn.cursor()
+    cursor.execute("UPDATE usuarios SET role=? WHERE id=?", (role, user_id))
+    conn.commit()
+    conn.close()
+
+
+def _definir_empresa(user_id: int, empresa: str, nome: str):
+    conn = sqlite3.connect("web/database.db")
+    cursor = conn.cursor()
+    cursor.execute(
+        "UPDATE usuarios SET nome_empresa=?, nome_funcionario=?, horas_diarias_esperadas_min=? WHERE id=?",
+        (empresa, nome, 8 * 60, user_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def _inserir_registro(user_id: int, data: str, entrada="08:00", saida_almoco="12:00", volta_almoco="13:00", saida_final="17:00"):
+    conn = sqlite3.connect("web/database.db")
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        INSERT INTO registros (user_id, data, entrada_manha, saida_almoco, volta_almoco, saida_final)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (user_id, data, entrada, saida_almoco, volta_almoco, saida_final),
+    )
+    conn.commit()
+    conn.close()
+
+
 def test_salvar_perfil(client):
     _criar_usuario_e_logar(client)
 
@@ -413,6 +453,93 @@ def test_dashboard_botao_registrar_ponto(client):
     assert b"btn btn-outline-success" in html
     assert b"btn btn-outline-danger" in html
     assert b'id="btnEsteMes"' in html
+
+
+def test_usuario_comum_nao_acessa_admin(client):
+    _criar_usuario_e_logar(client, "funcionario", "1234")
+    _definir_empresa(1, "Empresa A", "Funcionario A")
+
+    response = client.get("/admin", follow_redirects=False)
+
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/dashboard")
+
+
+def test_admin_acessa_admin_e_ve_funcionarios_da_propria_empresa(client):
+    _criar_usuario_e_logar(client, "admin", "1234")
+    _definir_role(1, "admin")
+    _definir_empresa(1, "Empresa A", "Admin A")
+
+    client.get("/logout")
+    _criar_usuario_e_logar(client, "funcionario_a", "1234")
+    _definir_empresa(2, "Empresa A", "Funcionario A")
+    _inserir_registro(2, "2026-04-10")
+
+    client.get("/logout")
+    client.post("/", data={"username": "admin", "password": "1234"})
+    response = client.get("/admin")
+
+    assert response.status_code == 200
+    assert "Funcionarios".encode("utf-8") in response.data or "Funcionários".encode("utf-8") in response.data
+    assert b"Funcionario A" in response.data
+    assert b"Empresa A" in response.data
+    assert b">1<" in response.data
+
+
+def test_admin_nao_ve_funcionarios_de_outra_empresa(client):
+    _criar_usuario_e_logar(client, "admin", "1234")
+    _definir_role(1, "admin")
+    _definir_empresa(1, "Empresa A", "Admin A")
+
+    client.get("/logout")
+    _criar_usuario_e_logar(client, "funcionario_a", "1234")
+    _definir_empresa(2, "Empresa A", "Funcionario A")
+
+    client.get("/logout")
+    _criar_usuario_e_logar(client, "funcionario_b", "1234")
+    _definir_empresa(3, "Empresa B", "Funcionario B")
+
+    client.get("/logout")
+    client.post("/", data={"username": "admin", "password": "1234"})
+    response = client.get("/admin")
+
+    assert response.status_code == 200
+    assert b"Funcionario A" in response.data
+    assert b"Funcionario B" not in response.data
+
+    bloqueado = client.get("/admin/funcionarios/3", follow_redirects=False)
+    assert bloqueado.status_code == 302
+    assert bloqueado.headers["Location"].endswith("/admin")
+
+
+def test_exportacao_admin_respeita_funcionario_selecionado(client):
+    _criar_usuario_e_logar(client, "admin", "1234")
+    _definir_role(1, "admin")
+    _definir_empresa(1, "Empresa A", "Admin A")
+
+    client.get("/logout")
+    _criar_usuario_e_logar(client, "funcionario_a", "1234")
+    _definir_empresa(2, "Empresa A", "Funcionario A")
+    _inserir_registro(2, "2026-04-10", entrada="08:00", saida_almoco="12:00", volta_almoco="13:00", saida_final="17:00")
+
+    client.get("/logout")
+    _criar_usuario_e_logar(client, "funcionario_b", "1234")
+    _definir_empresa(3, "Empresa A", "Funcionario B")
+    _inserir_registro(3, "2026-04-11", entrada="09:00", saida_almoco="12:00", volta_almoco="13:00", saida_final="18:00")
+
+    client.get("/logout")
+    client.post("/", data={"username": "admin", "password": "1234"})
+
+    response = client.get("/admin/funcionarios/2/export/excel")
+
+    assert response.status_code == 200
+    wb = openpyxl.load_workbook(BytesIO(response.data))
+    ws = wb.active
+    valores = [cell for row in ws.iter_rows(values_only=True) for cell in row if cell is not None]
+    assert any("Funcionario A" in str(valor) for valor in valores)
+    assert "2026-04-10" in valores
+    assert "2026-04-11" not in valores
+    assert "09:00" not in valores
 
 
 def test_api_sem_login_deve_falhar(client):

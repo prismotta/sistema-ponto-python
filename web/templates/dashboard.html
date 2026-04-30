@@ -43,6 +43,9 @@
     <div class="container-fluid">
         <span class="navbar-brand mb-0 h1">Sistema de Ponto</span>
         <div class="d-flex gap-2">
+            {% if usuario_admin %}
+            <a href="/admin" class="btn btn-outline-light btn-sm">Admin</a>
+            {% endif %}
             <a href="/perfil" class="btn btn-outline-light btn-sm">Perfil</a>
             <a href="/logout" class="btn btn-outline-light btn-sm">Logout</a>
         </div>

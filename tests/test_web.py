@@ -486,6 +486,28 @@ def test_admin_acessa_admin_e_ve_funcionarios_da_propria_empresa(client):
     assert b">1<" in response.data
 
 
+def test_promove_usuario_atual_para_admin_com_token(client, monkeypatch):
+    monkeypatch.setenv("ADMIN_PROMOTION_TOKEN", "segredo-teste")
+    _criar_usuario_e_logar(client, "funcionario", "1234")
+    _definir_empresa(1, "Empresa A", "Funcionario A")
+
+    negado = client.post("/admin/promover-atual")
+    assert negado.status_code == 403
+
+    promovido = client.post("/admin/promover-atual", data={"token": "segredo-teste"})
+    assert promovido.status_code == 200
+    assert promovido.is_json
+    assert promovido.json["usuario"]["id"] == 1
+    assert promovido.json["usuario"]["username"] == "funcionario"
+    assert promovido.json["usuario"]["role"] == "admin"
+
+    response_admin = client.get("/admin")
+    assert response_admin.status_code == 200
+
+    response_dashboard = client.get("/dashboard")
+    assert b'href="/admin"' in response_dashboard.data
+
+
 def test_admin_nao_ve_funcionarios_de_outra_empresa(client):
     _criar_usuario_e_logar(client, "admin", "1234")
     _definir_role(1, "admin")

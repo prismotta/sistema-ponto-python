@@ -401,6 +401,32 @@ def atualizar_perfil_usuario(user_id: int, dados: Dict[str, Any]) -> Tuple[bool,
     return True, None
 
 
+def promover_usuario_para_admin(user_id: int) -> Optional[Dict[str, Any]]:
+    conn = conectar()
+    cursor = conn.cursor()
+    cursor.execute(sql("SELECT id, username, role FROM usuarios WHERE id=?"), (user_id,))
+    antes = cursor.fetchone()
+    if not antes:
+        conn.close()
+        return None
+
+    cursor.execute(sql("UPDATE usuarios SET role='admin' WHERE id=?"), (user_id,))
+    conn.commit()
+    cursor.execute(sql("SELECT id, username, role FROM usuarios WHERE id=?"), (user_id,))
+    depois = cursor.fetchone()
+    conn.close()
+
+    if not depois:
+        return None
+
+    return {
+        "id": depois[0],
+        "username": depois[1],
+        "role_anterior": antes[2] or "user",
+        "role": depois[2] or "user",
+    }
+
+
 def excluir_registro_usuario(user_id: int, registro_id: int) -> bool:
     conn = conectar()
     cursor = conn.cursor()
@@ -1055,6 +1081,34 @@ def admin_dashboard():
         funcionarios=funcionarios,
         empresa_admin=empresa_admin or "-",
     )
+
+
+@app.route("/admin/promover-atual", methods=["POST"])
+def admin_promover_usuario_atual():
+    if not usuario_logado():
+        return api_erro("NÃ£o autenticado", 401)
+
+    token_configurado = os.getenv("ADMIN_PROMOTION_TOKEN")
+    token_recebido = (
+        request.headers.get("X-Admin-Promotion-Token")
+        or request.form.get("token")
+        or request.args.get("token")
+    )
+    if not token_configurado or token_recebido != token_configurado:
+        return api_erro("PromoÃ§Ã£o nÃ£o autorizada", 403)
+
+    user_id = session["user_id"]
+    usuario = promover_usuario_para_admin(user_id)
+    if not usuario:
+        return api_erro("UsuÃ¡rio nÃ£o encontrado", 404)
+
+    print(
+        "PROMOCAO_ADMIN "
+        f"id={usuario['id']} username={usuario['username']} "
+        f"role_anterior={usuario['role_anterior']} role={usuario['role']}",
+        flush=True,
+    )
+    return api_ok({"usuario": usuario})
 
 
 @app.route("/admin/funcionarios/<int:funcionario_id>")

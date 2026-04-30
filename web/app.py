@@ -345,7 +345,7 @@ def nome_usuario_para_exibicao(usuario: Dict[str, Any]) -> str:
     nome_exibicao = (usuario.get("nome_exibicao") or "").strip()
     nome_funcionario = (usuario.get("nome_funcionario") or "").strip()
     username = (usuario.get("username") or "").strip()
-    return nome_exibicao or nome_funcionario or username or "nÃ£o informado"
+    return nome_exibicao or nome_funcionario or username or "não informado"
 
 
 def admin_pode_acessar_funcionario(admin_id: int, funcionario_id: int) -> bool:
@@ -744,13 +744,13 @@ def montar_registros_para_tabela(registros_db: list[Tuple[Any, ...]], esperado_m
     return registros
 
 
-def periodo_para_texto(data_inicio: Optional[str], data_fim: Optional[str], prefixo: str = "PerÃ­odo") -> str:
+def periodo_para_texto(data_inicio: Optional[str], data_fim: Optional[str], prefixo: str = "Período") -> str:
     if data_inicio and data_fim:
-        return f"{prefixo}: {datetime.strptime(data_inicio, '%Y-%m-%d').strftime('%d/%m/%Y')} atÃ© {datetime.strptime(data_fim, '%Y-%m-%d').strftime('%d/%m/%Y')}"
+        return f"{prefixo}: {datetime.strptime(data_inicio, '%Y-%m-%d').strftime('%d/%m/%Y')} até {datetime.strptime(data_fim, '%Y-%m-%d').strftime('%d/%m/%Y')}"
     if data_inicio:
         return f"{prefixo}: a partir de {datetime.strptime(data_inicio, '%Y-%m-%d').strftime('%d/%m/%Y')}"
     if data_fim:
-        return f"{prefixo}: atÃ© {datetime.strptime(data_fim, '%Y-%m-%d').strftime('%d/%m/%Y')}"
+        return f"{prefixo}: até {datetime.strptime(data_fim, '%Y-%m-%d').strftime('%d/%m/%Y')}"
     return f"{prefixo}: todos os registros"
 
 
@@ -1055,7 +1055,7 @@ def admin_dashboard():
         return render_template(
             "admin.html",
             funcionarios=[],
-            empresa_admin="Empresa nÃ£o definida",
+            empresa_admin="Empresa não definida",
             aviso_admin="Defina sua empresa no Perfil para usar o painel admin.",
         )
 
@@ -1115,13 +1115,13 @@ def setup_admin_temporario():
         return redirect("/")
 
     if os.getenv("ALLOW_ADMIN_SETUP", "").lower() != "true":
-        flash_erro("Setup de admin nÃ£o autorizado.")
+        flash_erro("Setup de admin não autorizado.")
         return redirect("/dashboard")
 
     user_id = session["user_id"]
     usuario = promover_usuario_para_admin(user_id)
     if not usuario:
-        flash_erro("UsuÃ¡rio nÃ£o encontrado.")
+        flash_erro("Usuário não encontrado.")
         return redirect("/dashboard")
 
     print(
@@ -1130,7 +1130,7 @@ def setup_admin_temporario():
         f"role_anterior={usuario['role_anterior']} role={usuario['role']}",
         flush=True,
     )
-    flash_ok("UsuÃ¡rio promovido a admin com sucesso")
+    flash_ok("Usuário promovido a admin com sucesso")
     return redirect("/admin")
 
 
@@ -1145,15 +1145,15 @@ def admin_promover_usuario(usuario_id: int):
         return redirect("/dashboard")
 
     if not admin_pode_promover_usuario(admin_id, usuario_id):
-        flash_erro("UsuÃ¡rio nÃ£o encontrado para esta empresa ou jÃ¡ Ã© admin.")
+        flash_erro("Usuário não encontrado para esta empresa ou já é admin.")
         return redirect("/admin")
 
     usuario = promover_usuario_para_admin(usuario_id)
     if not usuario:
-        flash_erro("UsuÃ¡rio nÃ£o encontrado.")
+        flash_erro("Usuário não encontrado.")
         return redirect("/admin")
 
-    flash_ok("UsuÃ¡rio promovido a admin com sucesso")
+    flash_ok("Usuário promovido a admin com sucesso")
     return redirect("/admin")
 
 
@@ -1163,7 +1163,7 @@ def admin_funcionario(funcionario_id: int):
         return redirect("/")
     admin_id = session["user_id"]
     if not admin_pode_acessar_funcionario(admin_id, funcionario_id):
-        flash_erro("FuncionÃ¡rio nÃ£o encontrado para esta empresa.")
+        flash_erro("Funcionário não encontrado para esta empresa.")
         return redirect("/admin" if usuario_eh_admin(admin_id) else "/dashboard")
 
     data_inicio_raw = request.args.get("data_inicio")
@@ -1178,7 +1178,7 @@ def admin_funcionario(funcionario_id: int):
 
     funcionario = obter_usuario(funcionario_id)
     if not funcionario:
-        flash_erro("FuncionÃ¡rio nÃ£o encontrado.")
+        flash_erro("Funcionário não encontrado.")
         return redirect("/admin")
 
     esperado_min = funcionario.get("horas_diarias_esperadas_min") or 8 * 60
@@ -1202,7 +1202,7 @@ def admin_export_excel(funcionario_id: int):
         return redirect("/")
     admin_id = session["user_id"]
     if not admin_pode_acessar_funcionario(admin_id, funcionario_id):
-        flash_erro("FuncionÃ¡rio nÃ£o encontrado para esta empresa.")
+        flash_erro("Funcionário não encontrado para esta empresa.")
         return redirect("/admin" if usuario_eh_admin(admin_id) else "/dashboard")
 
     data_inicio_raw = request.args.get("data_inicio")
@@ -1215,23 +1215,23 @@ def admin_export_excel(funcionario_id: int):
 
     funcionario = obter_usuario(funcionario_id)
     if not funcionario:
-        flash_erro("FuncionÃ¡rio nÃ£o encontrado.")
+        flash_erro("Funcionário não encontrado.")
         return redirect("/admin")
 
     esperado_min = funcionario.get("horas_diarias_esperadas_min") or 8 * 60
     registros_db = buscar_registros_usuario(funcionario_id, data_inicio, data_fim)
     if not registros_db:
-        flash_aviso("NÃ£o hÃ¡ registros no perÃ­odo selecionado para exportar.")
+        flash_aviso("Não há registros no período selecionado para exportar.")
         return redirect(destino)
 
     wb = Workbook()
     ws = wb.active
     ws.title = "Registros"
     ws.append([periodo_para_texto(data_inicio, data_fim)])
-    ws.append([f"FuncionÃ¡rio: {nome_usuario_para_exibicao(funcionario)}"])
+    ws.append([f"Funcionário: {nome_usuario_para_exibicao(funcionario)}"])
     ws.append([f"Empresa: {empresa_normalizada(funcionario) or '-'}"])
     ws.append([])
-    headers = ["Data", "Entrada", "SaÃ­da AlmoÃ§o", "Volta AlmoÃ§o", "SaÃ­da Final", "Total Trabalhado", "Saldo do Dia"]
+    headers = ["Data", "Entrada", "Saída Almoço", "Volta Almoço", "Saída Final", "Total Trabalhado", "Saldo do Dia"]
     ws.append(headers)
 
     for cell in ws[5]:
@@ -1270,7 +1270,7 @@ def admin_export_pdf(funcionario_id: int):
         return redirect("/")
     admin_id = session["user_id"]
     if not admin_pode_acessar_funcionario(admin_id, funcionario_id):
-        flash_erro("FuncionÃ¡rio nÃ£o encontrado para esta empresa.")
+        flash_erro("Funcionário não encontrado para esta empresa.")
         return redirect("/admin" if usuario_eh_admin(admin_id) else "/dashboard")
 
     data_inicio_raw = request.args.get("data_inicio")
@@ -1283,28 +1283,28 @@ def admin_export_pdf(funcionario_id: int):
 
     funcionario = obter_usuario(funcionario_id)
     if not funcionario:
-        flash_erro("FuncionÃ¡rio nÃ£o encontrado.")
+        flash_erro("Funcionário não encontrado.")
         return redirect("/admin")
 
     esperado_min = funcionario.get("horas_diarias_esperadas_min") or 8 * 60
     registros_db = buscar_registros_usuario(funcionario_id, data_inicio, data_fim)
     if not registros_db:
-        flash_aviso("NÃ£o hÃ¡ registros no perÃ­odo selecionado para exportar.")
+        flash_aviso("Não há registros no período selecionado para exportar.")
         return redirect(destino)
 
     buffer = BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=A4, topMargin=18 * mm, bottomMargin=18 * mm, leftMargin=16 * mm, rightMargin=16 * mm, pageCompression=0, title="RelatÃ³rio de Ponto")
+    doc = SimpleDocTemplate(buffer, pagesize=A4, topMargin=18 * mm, bottomMargin=18 * mm, leftMargin=16 * mm, rightMargin=16 * mm, pageCompression=0, title="Relatório de Ponto")
     styles = getSampleStyleSheet()
     styles.add(ParagraphStyle(name="TitleCenter", parent=styles["Title"], alignment=TA_CENTER))
     story = [
-        Paragraph("RelatÃ³rio de Ponto", styles["TitleCenter"]),
+        Paragraph("Relatório de Ponto", styles["TitleCenter"]),
         Spacer(1, 4 * mm),
-        Paragraph(f"<b>FuncionÃ¡rio:</b> {nome_usuario_para_exibicao(funcionario)}", styles["Normal"]),
+        Paragraph(f"<b>Funcionário:</b> {nome_usuario_para_exibicao(funcionario)}", styles["Normal"]),
         Paragraph(f"<b>Empresa:</b> {empresa_normalizada(funcionario) or '-'}", styles["Normal"]),
         Paragraph(f"<b>{periodo_para_texto(data_inicio, data_fim)}</b>", styles["Normal"]),
         Spacer(1, 5 * mm),
     ]
-    data_table = [["Data", "Entrada", "SaÃ­da AlmoÃ§o", "Volta AlmoÃ§o", "SaÃ­da Final", "Total", "Saldo"]]
+    data_table = [["Data", "Entrada", "Saída Almoço", "Volta Almoço", "Saída Final", "Total", "Saldo"]]
     for registro in registros_db:
         total_linha = calcular_total_registro(registro)
         em_aberto = not bool(parse_hora(registro[6]))

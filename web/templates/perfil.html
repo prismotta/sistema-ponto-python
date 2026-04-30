@@ -38,7 +38,7 @@
             <h5 class="card-title">Perfil</h5>
             {% if not perfil.nome_empresa %}
                 <div class="alert alert-warning">
-                    Empresa nÃ£o definida. Informe sua empresa para usar os recursos multiempresa.
+                    Empresa não definida. Informe sua empresa para usar os recursos multiempresa.
                 </div>
             {% endif %}
 
@@ -57,7 +57,7 @@
                     <label class="form-label">Nome da Empresa</label>
                     {% if perfil.nome_empresa %}
                         <input type="text" class="form-control" value="{{ perfil.nome_empresa }}" disabled>
-                        <div class="form-text">A empresa jÃ¡ foi definida e nÃ£o pode ser alterada livremente.</div>
+                        <div class="form-text">A empresa já foi definida e não pode ser alterada livremente.</div>
                     {% else %}
                         <input type="text" name="nome_empresa" class="form-control" value="" required>
                     {% endif %}

@@ -523,6 +523,25 @@ def test_admin_acessa_admin_e_ve_funcionarios_da_propria_empresa(client):
     assert b">1<" in response.data
 
 
+def test_admin_renderiza_acentuacao_em_utf8(client):
+    _criar_usuario_e_logar(client, "admin", "1234")
+    _definir_role(1, "admin")
+    _definir_empresa(1, "Empresa A", "Admin A")
+
+    client.get("/logout")
+    _criar_usuario_e_logar(client, "funcionario_a", "1234")
+    _definir_empresa(2, "Empresa A", "Funcionario A")
+
+    client.get("/logout")
+    client.post("/", data={"username": "admin", "password": "1234"})
+    response = client.get("/admin")
+
+    assert response.status_code == 200
+    assert b'<meta charset="UTF-8">' in response.data
+    for palavra in ("Ações", "Usuário", "Histórico", "Administração"):
+        assert palavra.encode("utf-8") in response.data
+
+
 def test_admin_sem_empresa_nao_ve_lista(client):
     _criar_usuario_e_logar(client, "admin", "1234")
     _definir_role(1, "admin")
@@ -535,7 +554,7 @@ def test_admin_sem_empresa_nao_ve_lista(client):
     response = client.get("/admin")
 
     assert response.status_code == 200
-    assert "Empresa nÃ£o definida".encode("utf-8") in response.data
+    assert "Empresa não definida".encode("utf-8") in response.data
     assert "Defina sua empresa no Perfil para usar o painel admin.".encode("utf-8") in response.data
     assert b"funcionario_sem_empresa" not in response.data
 

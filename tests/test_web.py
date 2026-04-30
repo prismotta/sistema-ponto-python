@@ -486,20 +486,48 @@ def test_admin_acessa_admin_e_ve_funcionarios_da_propria_empresa(client):
     assert b">1<" in response.data
 
 
-def test_promove_usuario_atual_para_admin_com_token(client, monkeypatch):
-    monkeypatch.setenv("ADMIN_PROMOTION_TOKEN", "segredo-teste")
+def test_setup_admin_sem_login_nao_acessa(client, monkeypatch):
+    monkeypatch.setenv("ALLOW_ADMIN_SETUP", "true")
+
+    response = client.get("/setup-admin", follow_redirects=False)
+
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/")
+
+
+def test_setup_admin_sem_variavel_bloqueia(client, monkeypatch):
+    monkeypatch.delenv("ALLOW_ADMIN_SETUP", raising=False)
     _criar_usuario_e_logar(client, "funcionario", "1234")
     _definir_empresa(1, "Empresa A", "Funcionario A")
 
-    negado = client.post("/admin/promover-atual")
-    assert negado.status_code == 403
+    response = client.get("/setup-admin", follow_redirects=False)
 
-    promovido = client.post("/admin/promover-atual", data={"token": "segredo-teste"})
-    assert promovido.status_code == 200
-    assert promovido.is_json
-    assert promovido.json["usuario"]["id"] == 1
-    assert promovido.json["usuario"]["username"] == "funcionario"
-    assert promovido.json["usuario"]["role"] == "admin"
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/dashboard")
+
+    conn = sqlite3.connect("web/database.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT role FROM usuarios WHERE id=1")
+    role = cursor.fetchone()[0]
+    conn.close()
+    assert role == "user"
+
+
+def test_setup_admin_com_variavel_e_login_promove_usuario_atual(client, monkeypatch):
+    monkeypatch.setenv("ALLOW_ADMIN_SETUP", "true")
+    _criar_usuario_e_logar(client, "funcionario", "1234")
+    _definir_empresa(1, "Empresa A", "Funcionario A")
+
+    promovido = client.get("/setup-admin", follow_redirects=False)
+    assert promovido.status_code == 302
+    assert promovido.headers["Location"].endswith("/admin")
+
+    conn = sqlite3.connect("web/database.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, username, role FROM usuarios WHERE id=1")
+    usuario = cursor.fetchone()
+    conn.close()
+    assert usuario == (1, "funcionario", "admin")
 
     response_admin = client.get("/admin")
     assert response_admin.status_code == 200

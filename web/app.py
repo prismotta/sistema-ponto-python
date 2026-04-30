@@ -1083,24 +1083,20 @@ def admin_dashboard():
     )
 
 
-@app.route("/admin/promover-atual", methods=["POST"])
-def admin_promover_usuario_atual():
+@app.route("/setup-admin")
+def setup_admin_temporario():
     if not usuario_logado():
-        return api_erro("NÃ£o autenticado", 401)
+        return redirect("/")
 
-    token_configurado = os.getenv("ADMIN_PROMOTION_TOKEN")
-    token_recebido = (
-        request.headers.get("X-Admin-Promotion-Token")
-        or request.form.get("token")
-        or request.args.get("token")
-    )
-    if not token_configurado or token_recebido != token_configurado:
-        return api_erro("PromoÃ§Ã£o nÃ£o autorizada", 403)
+    if os.getenv("ALLOW_ADMIN_SETUP", "").lower() != "true":
+        flash_erro("Setup de admin nÃ£o autorizado.")
+        return redirect("/dashboard")
 
     user_id = session["user_id"]
     usuario = promover_usuario_para_admin(user_id)
     if not usuario:
-        return api_erro("UsuÃ¡rio nÃ£o encontrado", 404)
+        flash_erro("UsuÃ¡rio nÃ£o encontrado.")
+        return redirect("/dashboard")
 
     print(
         "PROMOCAO_ADMIN "
@@ -1108,7 +1104,8 @@ def admin_promover_usuario_atual():
         f"role_anterior={usuario['role_anterior']} role={usuario['role']}",
         flush=True,
     )
-    return api_ok({"usuario": usuario})
+    flash_ok("UsuÃ¡rio promovido a admin com sucesso")
+    return redirect("/admin")
 
 
 @app.route("/admin/funcionarios/<int:funcionario_id>")

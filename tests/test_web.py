@@ -300,6 +300,43 @@ def test_salvar_perfil(client):
     assert row == ("João da Silva", "João", "Empresa X", 8 * 60 + 30)
 
 
+def test_perfil_exige_empresa_quando_ainda_nao_definida(client):
+    _criar_usuario_e_logar(client)
+
+    response = client.post(
+        "/perfil",
+        data={"nome_funcionario": "João", "nome_empresa": "", "horas_diarias_esperadas": "8"},
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert "Informe a empresa para continuar.".encode("utf-8") in response.data
+
+
+def test_perfil_nao_permite_alterar_empresa_ja_definida(client):
+    _criar_usuario_e_logar(client)
+    client.post(
+        "/perfil",
+        data={"nome_funcionario": "João", "nome_empresa": "Empresa Original", "horas_diarias_esperadas": "8"},
+        follow_redirects=True,
+    )
+
+    response = client.post(
+        "/perfil",
+        data={"nome_funcionario": "João", "nome_empresa": "Empresa Alterada", "horas_diarias_esperadas": "8"},
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    conn = sqlite3.connect("web/database.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT nome_empresa FROM usuarios WHERE id=1")
+    empresa = cursor.fetchone()[0]
+    conn.close()
+    assert empresa == "Empresa Original"
+    assert b"Empresa Alterada" not in response.data
+
+
 def test_deletar_registro_so_afeta_usuario_logado(client):
     _criar_usuario_e_logar(client, "u1", "1234")
     client.get("/bater")
@@ -486,6 +523,23 @@ def test_admin_acessa_admin_e_ve_funcionarios_da_propria_empresa(client):
     assert b">1<" in response.data
 
 
+def test_admin_sem_empresa_nao_ve_lista(client):
+    _criar_usuario_e_logar(client, "admin", "1234")
+    _definir_role(1, "admin")
+
+    client.get("/logout")
+    _criar_usuario_e_logar(client, "funcionario_sem_empresa", "1234")
+
+    client.get("/logout")
+    client.post("/", data={"username": "admin", "password": "1234"})
+    response = client.get("/admin")
+
+    assert response.status_code == 200
+    assert "Empresa nÃ£o definida".encode("utf-8") in response.data
+    assert "Defina sua empresa no Perfil para usar o painel admin.".encode("utf-8") in response.data
+    assert b"funcionario_sem_empresa" not in response.data
+
+
 def test_setup_admin_sem_login_nao_acessa(client, monkeypatch):
     monkeypatch.setenv("ALLOW_ADMIN_SETUP", "true")
 
@@ -560,6 +614,28 @@ def test_admin_nao_ve_funcionarios_de_outra_empresa(client):
     bloqueado = client.get("/admin/funcionarios/3", follow_redirects=False)
     assert bloqueado.status_code == 302
     assert bloqueado.headers["Location"].endswith("/admin")
+
+
+def test_admin_nao_exporta_dados_de_outra_empresa(client):
+    _criar_usuario_e_logar(client, "admin", "1234")
+    _definir_role(1, "admin")
+    _definir_empresa(1, "Empresa A", "Admin A")
+
+    client.get("/logout")
+    _criar_usuario_e_logar(client, "funcionario_b", "1234")
+    _definir_empresa(2, "Empresa B", "Funcionario B")
+    _inserir_registro(2, "2026-04-10")
+
+    client.get("/logout")
+    client.post("/", data={"username": "admin", "password": "1234"})
+
+    excel = client.get("/admin/funcionarios/2/export/excel", follow_redirects=False)
+    assert excel.status_code == 302
+    assert excel.headers["Location"].endswith("/admin")
+
+    pdf = client.get("/admin/funcionarios/2/export/pdf", follow_redirects=False)
+    assert pdf.status_code == 302
+    assert pdf.headers["Location"].endswith("/admin")
 
 
 def test_exportacao_admin_respeita_funcionario_selecionado(client):
@@ -652,6 +728,23 @@ def test_api_listar_registros_apenas_do_usuario(client):
     assert resp.is_json
     assert resp.json["success"] is True
     assert len(resp.json["registros"]) == 1
+
+
+def test_usuario_comum_dashboard_mostra_apenas_proprios_dados(client):
+    _criar_usuario_e_logar(client, "u1", "1234")
+    _definir_empresa(1, "Empresa A", "Usuario 1")
+    _inserir_registro(1, "2026-04-10")
+
+    client.get("/logout")
+    _criar_usuario_e_logar(client, "u2", "1234")
+    _definir_empresa(2, "Empresa A", "Usuario 2")
+    _inserir_registro(2, "2026-04-11")
+
+    response = client.get("/dashboard")
+
+    assert response.status_code == 200
+    assert b"2026-04-11" in response.data
+    assert b"2026-04-10" not in response.data
 
 
 def test_api_registrar_ponto(client):

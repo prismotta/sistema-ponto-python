@@ -378,8 +378,15 @@ def perfil_para_json(perfil: Dict[str, Any]) -> Dict[str, Any]:
 def atualizar_perfil_usuario(user_id: int, dados: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
     nome_funcionario = (dados.get("nome_funcionario") or "").strip() or None
     nome_exibicao = (dados.get("nome_exibicao") or "").strip() or None
-    nome_empresa = (dados.get("nome_empresa") or "").strip() or None
     horas_texto = dados.get("horas_diarias_esperadas") or ""
+
+    perfil_atual = obter_perfil_usuario(user_id)
+    empresa_atual = (perfil_atual.get("nome_empresa") or "").strip()
+    nome_empresa = empresa_atual or None
+    if not empresa_atual and "nome_empresa" in dados:
+        nome_empresa = (dados.get("nome_empresa") or "").strip() or None
+        if not nome_empresa:
+            return False, "Informe a empresa para continuar."
 
     horas_min = parse_horas_esperadas_min(horas_texto)
     if str(horas_texto).strip() and horas_min is None:
@@ -1037,6 +1044,14 @@ def admin_dashboard():
         return redirect("/dashboard")
 
     empresa_admin = empresa_normalizada(admin)
+    if not empresa_admin:
+        return render_template(
+            "admin.html",
+            funcionarios=[],
+            empresa_admin="Empresa nÃ£o definida",
+            aviso_admin="Defina sua empresa no Perfil para usar o painel admin.",
+        )
+
     conn = conectar()
     cursor = conn.cursor()
     cursor.execute(
@@ -1080,6 +1095,7 @@ def admin_dashboard():
         "admin.html",
         funcionarios=funcionarios,
         empresa_admin=empresa_admin or "-",
+        aviso_admin=None,
     )
 
 
@@ -1278,14 +1294,17 @@ def perfil():
         return redirect("/")
 
     if request.method == "POST":
+        dados_perfil = {
+            "nome_funcionario": request.form.get("nome_funcionario"),
+            "nome_exibicao": request.form.get("nome_exibicao"),
+            "horas_diarias_esperadas": request.form.get("horas_diarias_esperadas"),
+        }
+        if "nome_empresa" in request.form:
+            dados_perfil["nome_empresa"] = request.form.get("nome_empresa")
+
         ok, erro = atualizar_perfil_usuario(
             session["user_id"],
-            {
-                "nome_funcionario": request.form.get("nome_funcionario"),
-                "nome_exibicao": request.form.get("nome_exibicao"),
-                "nome_empresa": request.form.get("nome_empresa"),
-                "horas_diarias_esperadas": request.form.get("horas_diarias_esperadas"),
-            },
+            dados_perfil,
         )
         if not ok:
             flash_erro(erro or "Não foi possível salvar o perfil.")

@@ -36,6 +36,11 @@
     <div class="card shadow-sm mb-4">
         <div class="card-body">
             <h5 class="card-title">Perfil</h5>
+            {% if not perfil.nome_empresa %}
+                <div class="alert alert-warning">
+                    Empresa nÃ£o definida. Informe sua empresa para usar os recursos multiempresa.
+                </div>
+            {% endif %}
 
             <form method="POST" action="/perfil">
                 <div class="mb-3">
@@ -50,7 +55,12 @@
 
                 <div class="mb-3">
                     <label class="form-label">Nome da Empresa</label>
-                    <input type="text" name="nome_empresa" class="form-control" value="{{ perfil.nome_empresa or '' }}">
+                    {% if perfil.nome_empresa %}
+                        <input type="text" class="form-control" value="{{ perfil.nome_empresa }}" disabled>
+                        <div class="form-text">A empresa jÃ¡ foi definida e nÃ£o pode ser alterada livremente.</div>
+                    {% else %}
+                        <input type="text" name="nome_empresa" class="form-control" value="" required>
+                    {% endif %}
                 </div>
 
                 <div class="mb-3">

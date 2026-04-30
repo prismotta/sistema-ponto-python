@@ -276,6 +276,15 @@ def _inserir_registro(user_id: int, data: str, entrada="08:00", saida_almoco="12
     conn.close()
 
 
+def _buscar_convite_por_email(email: str):
+    conn = sqlite3.connect("web/database.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, email, empresa, token, usado FROM invites WHERE email=?", (email,))
+    row = cursor.fetchone()
+    conn.close()
+    return row
+
+
 def test_salvar_perfil(client):
     _criar_usuario_e_logar(client)
 
@@ -725,6 +734,102 @@ def test_usuario_comum_nao_ve_botao_e_nao_promove(client):
     role = cursor.fetchone()[0]
     conn.close()
     assert role == "user"
+
+
+def test_convite_valido_cria_usuario_na_empresa_correta(client):
+    _criar_usuario_e_logar(client, "admin", "1234")
+    _definir_role(1, "admin")
+    _definir_empresa(1, "Empresa A", "Admin A")
+
+    response_convite = client.post("/admin/convites", data={"email": "novo@empresa.com"}, follow_redirects=True)
+    assert response_convite.status_code == 200
+    assert b"/register?token=" in response_convite.data
+
+    convite = _buscar_convite_por_email("novo@empresa.com")
+    assert convite is not None
+    token = convite[3]
+
+    client.get("/logout")
+    response_get = client.get(f"/register?token={token}")
+    assert response_get.status_code == 200
+    assert b"Empresa A" in response_get.data
+
+    response_register = client.post(
+        "/register",
+        data={"username": "novo", "password": "1234", "token": token},
+        follow_redirects=False,
+    )
+    assert response_register.status_code == 302
+    assert response_register.headers["Location"].endswith("/")
+
+    conn = sqlite3.connect("web/database.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT username, nome_empresa, role FROM usuarios WHERE username=?", ("novo",))
+    usuario = cursor.fetchone()
+    cursor.execute("SELECT usado FROM invites WHERE token=?", (token,))
+    usado = cursor.fetchone()[0]
+    conn.close()
+
+    assert usuario == ("novo", "Empresa A", "user")
+    assert usado == 1
+
+
+def test_convite_nao_pode_ser_reutilizado(client):
+    _criar_usuario_e_logar(client, "admin", "1234")
+    _definir_role(1, "admin")
+    _definir_empresa(1, "Empresa A", "Admin A")
+    client.post("/admin/convites", data={"email": "novo@empresa.com"})
+    token = _buscar_convite_por_email("novo@empresa.com")[3]
+
+    client.get("/logout")
+    client.post("/register", data={"username": "novo", "password": "1234", "token": token})
+
+    response = client.get(f"/register?token={token}")
+
+    assert response.status_code == 200
+    assert "Convite inválido ou já utilizado.".encode("utf-8") in response.data
+    assert b'name="username"' not in response.data
+
+
+def test_usuario_nao_consegue_mudar_empresa_do_convite_manualmente(client):
+    _criar_usuario_e_logar(client, "admin", "1234")
+    _definir_role(1, "admin")
+    _definir_empresa(1, "Empresa A", "Admin A")
+    client.post("/admin/convites", data={"email": "novo@empresa.com"})
+    token = _buscar_convite_por_email("novo@empresa.com")[3]
+
+    client.get("/logout")
+    client.post(
+        "/register",
+        data={"username": "novo", "password": "1234", "token": token, "nome_empresa": "Empresa B"},
+    )
+
+    conn = sqlite3.connect("web/database.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT nome_empresa FROM usuarios WHERE username=?", ("novo",))
+    empresa = cursor.fetchone()[0]
+    conn.close()
+    assert empresa == "Empresa A"
+
+
+def test_admin_cancela_convite_pendente(client):
+    _criar_usuario_e_logar(client, "admin", "1234")
+    _definir_role(1, "admin")
+    _definir_empresa(1, "Empresa A", "Admin A")
+    client.post("/admin/convites", data={"email": "novo@empresa.com"})
+    convite_id = _buscar_convite_por_email("novo@empresa.com")[0]
+
+    response = client.post(f"/admin/convites/{convite_id}/cancelar", follow_redirects=True)
+
+    assert response.status_code == 200
+    assert b"Convite cancelado com sucesso." in response.data
+    conn = sqlite3.connect("web/database.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT usado FROM invites WHERE id=?", (convite_id,))
+    usado = cursor.fetchone()[0]
+    conn.close()
+    assert usado == 1
+    assert b"novo@empresa.com" not in response.data
 
 
 def test_exportacao_admin_respeita_funcionario_selecionado(client):

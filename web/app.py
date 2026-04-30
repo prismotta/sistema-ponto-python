@@ -16,6 +16,7 @@ O banco é selecionado automaticamente via variável de ambiente.
 """
 
 import os
+import secrets
 import sqlite3
 from urllib.parse import urlparse
 from datetime import datetime, timedelta
@@ -131,6 +132,16 @@ def criar_banco() -> None:
                 saida_final TEXT
             )
         """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS invites (
+                id SERIAL PRIMARY KEY,
+                email TEXT NOT NULL,
+                empresa TEXT NOT NULL,
+                token TEXT UNIQUE NOT NULL,
+                usado BOOLEAN NOT NULL DEFAULT FALSE,
+                data_criacao TEXT NOT NULL
+            )
+        """)
 
         # Migração: adiciona colunas ausentes em bases antigas
         for coluna in ("entrada_manha", "saida_almoco", "volta_almoco", "saida_final"):
@@ -165,6 +176,16 @@ def criar_banco() -> None:
                 volta_almoco TEXT,
                 saida_final TEXT,
                 FOREIGN KEY(user_id) REFERENCES usuarios(id)
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS invites (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                email TEXT NOT NULL,
+                empresa TEXT NOT NULL,
+                token TEXT UNIQUE NOT NULL,
+                usado INTEGER NOT NULL DEFAULT 0,
+                data_criacao TEXT NOT NULL
             )
         """)
 
@@ -439,6 +460,93 @@ def promover_usuario_para_admin(user_id: int) -> Optional[Dict[str, Any]]:
         "role_anterior": antes[2] or "user",
         "role": depois[2] or "user",
     }
+
+
+def obter_convite_por_token(token: str, apenas_pendente: bool = True) -> Optional[Dict[str, Any]]:
+    token = (token or "").strip()
+    if not token:
+        return None
+
+    conn = conectar()
+    cursor = conn.cursor()
+    query = "SELECT id, email, empresa, token, usado, data_criacao FROM invites WHERE token=?"
+    if apenas_pendente:
+        query += " AND usado=FALSE"
+    cursor.execute(sql(query), (token,))
+    row = cursor.fetchone()
+    conn.close()
+
+    if not row:
+        return None
+
+    return {
+        "id": row[0],
+        "email": row[1],
+        "empresa": row[2],
+        "token": row[3],
+        "usado": bool(row[4]),
+        "data_criacao": row[5],
+    }
+
+
+def criar_convite(email: str, empresa: str) -> Dict[str, Any]:
+    token = secrets.token_urlsafe(24)
+    data_criacao = agora().isoformat(timespec="seconds")
+
+    conn = conectar()
+    cursor = conn.cursor()
+    cursor.execute(
+        sql("""
+            INSERT INTO invites (email, empresa, token, usado, data_criacao)
+            VALUES (?, ?, ?, FALSE, ?)
+        """),
+        (email, empresa, token, data_criacao),
+    )
+    conn.commit()
+    conn.close()
+
+    return {"email": email, "empresa": empresa, "token": token, "data_criacao": data_criacao}
+
+
+def listar_convites_pendentes(empresa: str) -> list[Dict[str, Any]]:
+    conn = conectar()
+    cursor = conn.cursor()
+    cursor.execute(
+        sql("""
+            SELECT id, email, empresa, token, data_criacao
+            FROM invites
+            WHERE empresa=? AND usado=FALSE
+            ORDER BY id DESC
+        """),
+        (empresa,),
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    return [
+        {"id": row[0], "email": row[1], "empresa": row[2], "token": row[3], "data_criacao": row[4]}
+        for row in rows
+    ]
+
+
+def marcar_convite_usado(convite_id: int) -> None:
+    conn = conectar()
+    cursor = conn.cursor()
+    cursor.execute(sql("UPDATE invites SET usado=TRUE WHERE id=?"), (convite_id,))
+    conn.commit()
+    conn.close()
+
+
+def cancelar_convite_empresa(convite_id: int, empresa: str) -> bool:
+    conn = conectar()
+    cursor = conn.cursor()
+    cursor.execute(
+        sql("UPDATE invites SET usado=TRUE WHERE id=? AND empresa=? AND usado=FALSE"),
+        (convite_id, empresa),
+    )
+    alterados = cursor.rowcount
+    conn.commit()
+    conn.close()
+    return bool(alterados)
 
 
 def excluir_registro_usuario(user_id: int, registro_id: int) -> bool:
@@ -812,12 +920,21 @@ def register():
     """
     Registra novo usuário.
     """
+    token_convite = (request.values.get("token") or "").strip()
+    convite = obter_convite_por_token(token_convite) if token_convite else None
+    if token_convite and not convite:
+        return render_template(
+            "register.html",
+            erro="Convite inválido ou já utilizado.",
+            convite_bloqueado=True,
+        )
+
     if request.method == "POST":
         username = request.form.get("username")
         password = request.form.get("password")
 
         if not username or not password:
-            return render_template("register.html", erro="Preencha todos os campos")
+            return render_template("register.html", erro="Preencha todos os campos", convite=convite, token=token_convite)
 
         senha_hash = generate_password_hash(password)
 
@@ -825,19 +942,27 @@ def register():
         cursor = conn.cursor()
 
         try:
-            cursor.execute(
-                sql("INSERT INTO usuarios (username, password) VALUES (?, ?)"),
-                (username, senha_hash)
-            )
+            if convite:
+                cursor.execute(
+                    sql("INSERT INTO usuarios (username, password, nome_empresa) VALUES (?, ?, ?)"),
+                    (username, senha_hash, convite["empresa"]),
+                )
+            else:
+                cursor.execute(
+                    sql("INSERT INTO usuarios (username, password) VALUES (?, ?)"),
+                    (username, senha_hash),
+                )
             conn.commit()
         except Exception:
             conn.close()
-            return render_template("register.html", erro="Usuário já existe")
+            return render_template("register.html", erro="Usuário já existe", convite=convite, token=token_convite)
 
         conn.close()
+        if convite:
+            marcar_convite_usado(convite["id"])
         return redirect("/")
 
-    return render_template("register.html")
+    return render_template("register.html", convite=convite, token=token_convite)
 
 
 @app.route("/dashboard")
@@ -1057,6 +1182,7 @@ def admin_dashboard():
             funcionarios=[],
             empresa_admin="Empresa não definida",
             aviso_admin="Defina sua empresa no Perfil para usar o painel admin.",
+            convites=[],
         )
 
     conn = conectar()
@@ -1106,7 +1232,54 @@ def admin_dashboard():
         funcionarios=funcionarios,
         empresa_admin=empresa_admin or "-",
         aviso_admin=None,
+        convites=listar_convites_pendentes(empresa_admin),
     )
+
+
+@app.route("/admin/convites", methods=["POST"])
+def admin_criar_convite():
+    if not usuario_logado():
+        return redirect("/")
+
+    admin_id = session["user_id"]
+    admin = obter_usuario(admin_id)
+    if not admin or admin.get("role") != "admin":
+        flash_erro("Acesso restrito a administradores.")
+        return redirect("/dashboard")
+
+    empresa_admin = empresa_normalizada(admin)
+    if not empresa_admin:
+        flash_erro("Defina sua empresa no Perfil para convidar usuários.")
+        return redirect("/admin")
+
+    email = (request.form.get("email") or "").strip().lower()
+    if not email or "@" not in email:
+        flash_erro("Informe um email válido para o convite.")
+        return redirect("/admin")
+
+    convite = criar_convite(email, empresa_admin)
+    flash_info(f"Link de convite: /register?token={convite['token']}")
+    return redirect("/admin")
+
+
+@app.route("/admin/convites/<int:convite_id>/cancelar", methods=["POST"])
+def admin_cancelar_convite(convite_id: int):
+    if not usuario_logado():
+        return redirect("/")
+
+    admin_id = session["user_id"]
+    admin = obter_usuario(admin_id)
+    if not admin or admin.get("role") != "admin":
+        flash_erro("Acesso restrito a administradores.")
+        return redirect("/dashboard")
+
+    empresa_admin = empresa_normalizada(admin)
+    if not empresa_admin or not cancelar_convite_empresa(convite_id, empresa_admin):
+        flash_erro("Convite não encontrado para esta empresa.")
+        return redirect("/admin")
+
+    flash_ok("Convite cancelado com sucesso.")
+    return redirect("/admin")
 
 
 @app.route("/setup-admin")

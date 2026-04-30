@@ -44,6 +44,57 @@
         <div class="alert alert-warning">{{ aviso_admin }}</div>
     {% endif %}
 
+    {% if not aviso_admin %}
+    <div class="card shadow-sm mb-3">
+        <div class="card-body">
+            <h2 class="h6 mb-3">Convidar usuário</h2>
+            <form class="row g-2 align-items-end" method="POST" action="/admin/convites">
+                <div class="col-12 col-md-8">
+                    <label class="form-label">Email</label>
+                    <input type="email" name="email" class="form-control" required>
+                </div>
+                <div class="col-12 col-md-4">
+                    <button type="submit" class="btn btn-primary">Convidar usuário</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="card shadow-sm mb-3">
+        <div class="card-body">
+            <h2 class="h6 mb-3">Convites pendentes</h2>
+            <div class="table-responsive">
+                <table class="table table-sm table-bordered align-middle">
+                    <thead>
+                        <tr>
+                            <th>Email</th>
+                            <th>Link</th>
+                            <th>Ações</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for convite in convites %}
+                        <tr>
+                            <td>{{ convite.email }}</td>
+                            <td><code>/register?token={{ convite.token }}</code></td>
+                            <td>
+                                <form method="POST" action="/admin/convites/{{ convite.id }}/cancelar">
+                                    <button type="submit" class="btn btn-sm btn-outline-danger">Cancelar</button>
+                                </form>
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="3" class="text-center text-muted">Nenhum convite pendente.</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
     <div class="card shadow-sm">
         <div class="card-body">
             <div class="table-responsive">

@@ -1,10 +1,11 @@
 /* Basic PWA service worker for Sistema de Ponto */
 
 // Bump this version whenever you want to force-update cached assets.
-const CACHE_NAME = "ponto-v2";
+const CACHE_NAME = "ponto-v3";
 const PRECACHE_URLS = [
   "/",
   "/manifest.json",
+  "/static/styles.css",
   "/static/icons/icon-192.svg",
   "/static/icons/icon-512.svg",
 ];

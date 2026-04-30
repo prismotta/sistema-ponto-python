@@ -64,9 +64,10 @@
 
     <div class="mb-3 mb-md-4">
         <p class="mb-2">Funcionário: {{ nome_funcionario }}</p>
-        <a href="/bater" class="btn btn-primary btn-ponto-principal">
+        <a href="/bater" class="btn btn-primary btn-ponto-principal" data-loading-text="Registrando...">
             <span class="btn-ponto-principal-icone" aria-hidden="true">⏱️</span>
-            <span>{{ botao_ponto_texto }}</span>
+            <span class="spinner-border spinner-border-sm d-none btn-ponto-principal-spinner" aria-hidden="true"></span>
+            <span class="btn-ponto-principal-texto">{{ botao_ponto_texto }}</span>
         </a>
     </div>
 
@@ -292,6 +293,59 @@
 
       const form = inicio.closest('form');
       if (form) form.submit();
+    });
+  }
+
+  const btnPontoPrincipal = document.querySelector('.btn-ponto-principal');
+  if (btnPontoPrincipal) {
+    const textoPontoPrincipal = btnPontoPrincipal.querySelector('.btn-ponto-principal-texto');
+    const spinnerPontoPrincipal = btnPontoPrincipal.querySelector('.btn-ponto-principal-spinner');
+    const textoOriginalPontoPrincipal = textoPontoPrincipal ? textoPontoPrincipal.textContent : '';
+    let registroPontoEmAndamento = false;
+
+    const ativarLoadingPonto = () => {
+      registroPontoEmAndamento = true;
+      btnPontoPrincipal.classList.add('disabled');
+      btnPontoPrincipal.setAttribute('aria-disabled', 'true');
+
+      if (textoPontoPrincipal) {
+        textoPontoPrincipal.textContent = btnPontoPrincipal.dataset.loadingText || 'Registrando...';
+      }
+      if (spinnerPontoPrincipal) {
+        spinnerPontoPrincipal.classList.remove('d-none');
+      }
+    };
+
+    const restaurarBotaoPonto = () => {
+      registroPontoEmAndamento = false;
+      btnPontoPrincipal.classList.remove('disabled');
+      btnPontoPrincipal.removeAttribute('aria-disabled');
+
+      if (textoPontoPrincipal) {
+        textoPontoPrincipal.textContent = textoOriginalPontoPrincipal;
+      }
+      if (spinnerPontoPrincipal) {
+        spinnerPontoPrincipal.classList.add('d-none');
+      }
+    };
+
+    btnPontoPrincipal.addEventListener('click', (event) => {
+      if (registroPontoEmAndamento) {
+        event.preventDefault();
+        return;
+      }
+
+      if (navigator.vibrate) {
+        navigator.vibrate(50);
+      }
+
+      ativarLoadingPonto();
+    });
+
+    window.addEventListener('pageshow', (event) => {
+      if (event.persisted) {
+        restaurarBotaoPonto();
+      }
     });
   }
 </script>

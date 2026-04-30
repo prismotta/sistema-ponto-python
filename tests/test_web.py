@@ -396,6 +396,19 @@ def test_dashboard_botao_registrar_ponto(client):
     response = client.get("/dashboard")
     assert response.status_code == 200
     assert "Registrar entrada".encode("utf-8") in response.data
+    assert b'href="/bater"' in response.data
+    assert b"btn-ponto-principal" in response.data
+    assert b"btn-ponto-principal-texto" in response.data
+    assert b"btn-ponto-principal-spinner" in response.data
+    assert b"data-loading-text=\"Registrando...\"" in response.data
+    assert b"navigator.vibrate" in response.data
+    assert b"navigator.vibrate(50)" in response.data
+    assert b"classList.add('disabled')" in response.data
+    assert b"aria-disabled" in response.data
+    assert b"event.preventDefault()" in response.data
+    assert b"btn btn-outline-success" in response.data
+    assert b"btn btn-outline-danger" in response.data
+    assert b'id="btnEsteMes"' in response.data
 
 
 def test_api_sem_login_deve_falhar(client):

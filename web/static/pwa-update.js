@@ -2,6 +2,8 @@
   if (!("serviceWorker" in navigator)) return;
 
   const BANNER_ID = "pwa-update-banner";
+  let newWorker = null;
+  let refreshing = false;
 
   function ensureBanner() {
     let banner = document.getElementById(BANNER_ID);
@@ -46,38 +48,42 @@
     return banner;
   }
 
-  function showBanner(onUpdate) {
+  function showBanner() {
     const banner = ensureBanner();
     const btn = document.getElementById(`${BANNER_ID}-btn`);
-    if (btn) btn.onclick = onUpdate;
+    if (btn) {
+      btn.onclick = () => {
+        if (!newWorker) return;
+        newWorker.postMessage({ type: "SKIP_WAITING" });
+      };
+    }
     banner.style.display = "block";
   }
-
-  let refreshing = false;
 
   window.addEventListener("load", async () => {
     try {
       const registration = await navigator.serviceWorker.register("/service-worker.js");
 
       function promptUpdate() {
-        const waiting = registration.waiting;
-        if (!waiting) return;
-
-        showBanner(() => {
-          waiting.postMessage({ type: "SKIP_WAITING" });
-        });
+        if (!newWorker && registration.waiting) {
+          newWorker = registration.waiting;
+        }
+        if (!newWorker) return;
+        showBanner();
       }
 
       if (registration.waiting && navigator.serviceWorker.controller) {
+        newWorker = registration.waiting;
         promptUpdate();
       }
 
       registration.addEventListener("updatefound", () => {
-        const newWorker = registration.installing;
-        if (!newWorker) return;
+        const installingWorker = registration.installing;
+        if (!installingWorker) return;
 
-        newWorker.addEventListener("statechange", () => {
-          if (newWorker.state === "installed" && navigator.serviceWorker.controller) {
+        installingWorker.addEventListener("statechange", () => {
+          if (installingWorker.state === "installed" && navigator.serviceWorker.controller) {
+            newWorker = installingWorker;
             promptUpdate();
           }
         });
@@ -93,4 +99,3 @@
     }
   });
 })();
-

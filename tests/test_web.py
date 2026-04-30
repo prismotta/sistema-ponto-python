@@ -883,6 +883,28 @@ def test_pwa_manifest_e_service_worker_sao_servidos(client):
     assert b"service worker" in resp_sw.data.lower() or b"addEventListener" in resp_sw.data
 
 
+def test_pwa_update_manual_envia_skip_waiting_e_recarrega_uma_vez(client):
+    resp_js = client.get("/static/pwa-update.js")
+    assert resp_js.status_code == 200
+    js = resp_js.data
+
+    assert b"let newWorker = null" in js
+    assert b"registration.waiting" in js
+    assert b"updatefound" in js
+    assert b'state === "installed"' in js
+    assert b'navigator.serviceWorker.controller' in js
+    assert b'newWorker.postMessage({ type: "SKIP_WAITING" })' in js
+    assert b"controllerchange" in js
+    assert b"let refreshing = false" in js
+    assert b"window.location.reload()" in js
+
+    resp_sw = client.get("/service-worker.js")
+    sw = resp_sw.data
+    assert b"type === \"SKIP_WAITING\"" in sw
+    assert b"self.skipWaiting()" in sw
+    assert b".then(() => self.skipWaiting())" not in sw
+
+
 def test_api_get_profile_logado(client):
     _criar_usuario_e_logar(client)
     client.put(

@@ -395,20 +395,24 @@ def test_dashboard_botao_registrar_ponto(client):
     _criar_usuario_e_logar(client)
     response = client.get("/dashboard")
     assert response.status_code == 200
+    html = response.data
     assert "Registrar entrada".encode("utf-8") in response.data
-    assert b'href="/bater"' in response.data
-    assert b"btn-ponto-principal" in response.data
-    assert b"btn-ponto-principal-texto" in response.data
-    assert b"btn-ponto-principal-spinner" in response.data
-    assert b"data-loading-text=\"Registrando...\"" in response.data
-    assert b"navigator.vibrate" in response.data
-    assert b"navigator.vibrate(50)" in response.data
-    assert b"classList.add('disabled')" in response.data
-    assert b"aria-disabled" in response.data
-    assert b"event.preventDefault()" in response.data
-    assert b"btn btn-outline-success" in response.data
-    assert b"btn btn-outline-danger" in response.data
-    assert b'id="btnEsteMes"' in response.data
+    assert b'href="/bater"' in html
+    assert b"btn-ponto-principal" in html
+    assert b"btn-ponto-principal-texto" in html
+    assert b"btn-ponto-principal-spinner" in html
+    assert b"data-loading-text=\"Registrando...\"" in html
+    assert b"addEventListener('click', function(event)" in html
+    assert b"if (navigator.vibrate)" in html
+    assert b"navigator.vibrate(50)" in html
+    assert b"classList.add('disabled')" in html
+    assert b"aria-disabled" in html
+    assert b"event.preventDefault()" in html
+    assert html.index(b"navigator.vibrate(50)") < html.index(b"ativarLoadingPonto();")
+    assert html.index(b"navigator.vibrate(50)") < html.index(b"event.preventDefault()")
+    assert b"btn btn-outline-success" in html
+    assert b"btn btn-outline-danger" in html
+    assert b'id="btnEsteMes"' in html
 
 
 def test_api_sem_login_deve_falhar(client):

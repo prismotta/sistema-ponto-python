@@ -329,14 +329,14 @@
       }
     };
 
-    btnPontoPrincipal.addEventListener('click', (event) => {
+    btnPontoPrincipal.addEventListener('click', function(event) {
+      if (navigator.vibrate) {
+        navigator.vibrate(50);
+      }
+
       if (registroPontoEmAndamento) {
         event.preventDefault();
         return;
-      }
-
-      if (navigator.vibrate) {
-        navigator.vibrate(50);
       }
 
       ativarLoadingPonto();

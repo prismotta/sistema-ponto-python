@@ -638,6 +638,76 @@ def test_admin_nao_exporta_dados_de_outra_empresa(client):
     assert pdf.headers["Location"].endswith("/admin")
 
 
+def test_admin_promove_usuario_da_mesma_empresa(client):
+    _criar_usuario_e_logar(client, "admin", "1234")
+    _definir_role(1, "admin")
+    _definir_empresa(1, "Empresa A", "Admin A")
+
+    client.get("/logout")
+    _criar_usuario_e_logar(client, "funcionario_a", "1234")
+    _definir_empresa(2, "Empresa A", "Funcionario A")
+
+    client.get("/logout")
+    client.post("/", data={"username": "admin", "password": "1234"})
+    response = client.post("/admin/usuarios/2/promover-admin", follow_redirects=True)
+
+    assert response.status_code == 200
+    assert b"promovido a admin com sucesso" in response.data
+    conn = sqlite3.connect("web/database.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT role FROM usuarios WHERE id=2")
+    role = cursor.fetchone()[0]
+    conn.close()
+    assert role == "admin"
+    assert b"Tornar admin" not in response.data
+
+
+def test_admin_nao_promove_usuario_de_outra_empresa(client):
+    _criar_usuario_e_logar(client, "admin", "1234")
+    _definir_role(1, "admin")
+    _definir_empresa(1, "Empresa A", "Admin A")
+
+    client.get("/logout")
+    _criar_usuario_e_logar(client, "funcionario_b", "1234")
+    _definir_empresa(2, "Empresa B", "Funcionario B")
+
+    client.get("/logout")
+    client.post("/", data={"username": "admin", "password": "1234"})
+    response = client.post("/admin/usuarios/2/promover-admin", follow_redirects=False)
+
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/admin")
+    conn = sqlite3.connect("web/database.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT role FROM usuarios WHERE id=2")
+    role = cursor.fetchone()[0]
+    conn.close()
+    assert role == "user"
+
+
+def test_usuario_comum_nao_ve_botao_e_nao_promove(client):
+    _criar_usuario_e_logar(client, "u1", "1234")
+    _definir_empresa(1, "Empresa A", "Usuario 1")
+
+    client.get("/logout")
+    _criar_usuario_e_logar(client, "u2", "1234")
+    _definir_empresa(2, "Empresa A", "Usuario 2")
+
+    dashboard = client.get("/dashboard")
+    assert b"Tornar admin" not in dashboard.data
+
+    response = client.post("/admin/usuarios/1/promover-admin", follow_redirects=False)
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/dashboard")
+
+    conn = sqlite3.connect("web/database.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT role FROM usuarios WHERE id=1")
+    role = cursor.fetchone()[0]
+    conn.close()
+    assert role == "user"
+
+
 def test_exportacao_admin_respeita_funcionario_selecionado(client):
     _criar_usuario_e_logar(client, "admin", "1234")
     _definir_role(1, "admin")

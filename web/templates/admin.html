@@ -37,7 +37,7 @@
     {% endwith %}
 
     <div class="mb-3">
-        <h1 class="h4 mb-1">Funcionários</h1>
+        <h1 class="h4 mb-1">Funcionarios</h1>
         <p class="text-muted mb-0">Empresa: {{ empresa_admin }}</p>
     </div>
     {% if aviso_admin %}
@@ -52,9 +52,10 @@
                         <tr>
                             <th>Nome</th>
                             <th>Empresa</th>
+                            <th>Papel</th>
                             <th>Total de registros</th>
-                            <th>Banco de horas do mês atual</th>
-                            <th>Ações</th>
+                            <th>Banco de horas do mes atual</th>
+                            <th>Acoes</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -62,15 +63,27 @@
                         <tr>
                             <td>{{ funcionario.nome }}</td>
                             <td>{{ funcionario.empresa }}</td>
+                            <td>
+                                {% if funcionario.is_admin %}
+                                    <span class="badge text-bg-primary">Admin</span>
+                                {% else %}
+                                    <span class="badge text-bg-secondary">Usuario</span>
+                                {% endif %}
+                            </td>
                             <td>{{ funcionario.total_registros }}</td>
                             <td>{{ funcionario.banco_mes_atual }}</td>
-                            <td>
-                                <a class="btn btn-sm btn-primary" href="/admin/funcionarios/{{ funcionario.id }}">Histórico</a>
+                            <td class="d-flex flex-wrap gap-2">
+                                <a class="btn btn-sm btn-primary" href="/admin/funcionarios/{{ funcionario.id }}">Historico</a>
+                                {% if funcionario.pode_promover %}
+                                <form method="POST" action="/admin/usuarios/{{ funcionario.id }}/promover-admin">
+                                    <button type="submit" class="btn btn-sm btn-outline-primary">Tornar admin</button>
+                                </form>
+                                {% endif %}
                             </td>
                         </tr>
                         {% else %}
                         <tr>
-                            <td colspan="5" class="text-center text-muted">Nenhum funcionário encontrado para esta empresa.</td>
+                            <td colspan="6" class="text-center text-muted">Nenhum funcionario encontrado para esta empresa.</td>
                         </tr>
                         {% endfor %}
                     </tbody>

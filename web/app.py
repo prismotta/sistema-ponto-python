@@ -353,10 +353,17 @@ def admin_pode_acessar_funcionario(admin_id: int, funcionario_id: int) -> bool:
     funcionario = obter_usuario(funcionario_id)
     if not admin or not funcionario:
         return False
-    if admin.get("role") != "admin" or funcionario.get("role") != "user":
+    if admin.get("role") != "admin":
         return False
     empresa_admin = empresa_normalizada(admin)
     return bool(empresa_admin) and empresa_admin == empresa_normalizada(funcionario)
+
+
+def admin_pode_promover_usuario(admin_id: int, usuario_id: int) -> bool:
+    if admin_id == usuario_id:
+        return False
+    usuario = obter_usuario(usuario_id)
+    return bool(usuario and usuario.get("role") == "user" and admin_pode_acessar_funcionario(admin_id, usuario_id))
 
 
 def primeiro_nome(nome: Optional[str]) -> Optional[str]:
@@ -1058,7 +1065,7 @@ def admin_dashboard():
         sql("""
             SELECT id, username, nome_funcionario, nome_exibicao, nome_empresa, horas_diarias_esperadas_min, role
             FROM usuarios
-            WHERE role='user' AND COALESCE(nome_empresa, '')=?
+            WHERE COALESCE(nome_empresa, '')=?
             ORDER BY COALESCE(nome_funcionario, username), username
         """),
         (empresa_admin,),
@@ -1086,6 +1093,9 @@ def admin_dashboard():
                 "id": funcionario["id"],
                 "nome": nome_usuario_para_exibicao(funcionario),
                 "empresa": empresa_normalizada(funcionario) or "-",
+                "role": funcionario["role"],
+                "is_admin": funcionario["role"] == "admin",
+                "pode_promover": admin_pode_promover_usuario(admin_id, funcionario["id"]),
                 "total_registros": len(todos_registros),
                 "banco_mes_atual": formatar_banco_horas(calcular_banco_registros(registros_mes, esperado_min)),
             }
@@ -1120,6 +1130,29 @@ def setup_admin_temporario():
         f"role_anterior={usuario['role_anterior']} role={usuario['role']}",
         flush=True,
     )
+    flash_ok("UsuÃ¡rio promovido a admin com sucesso")
+    return redirect("/admin")
+
+
+@app.route("/admin/usuarios/<int:usuario_id>/promover-admin", methods=["POST"])
+def admin_promover_usuario(usuario_id: int):
+    if not usuario_logado():
+        return redirect("/")
+
+    admin_id = session["user_id"]
+    if not usuario_eh_admin(admin_id):
+        flash_erro("Acesso restrito a administradores.")
+        return redirect("/dashboard")
+
+    if not admin_pode_promover_usuario(admin_id, usuario_id):
+        flash_erro("UsuÃ¡rio nÃ£o encontrado para esta empresa ou jÃ¡ Ã© admin.")
+        return redirect("/admin")
+
+    usuario = promover_usuario_para_admin(usuario_id)
+    if not usuario:
+        flash_erro("UsuÃ¡rio nÃ£o encontrado.")
+        return redirect("/admin")
+
     flash_ok("UsuÃ¡rio promovido a admin com sucesso")
     return redirect("/admin")
 

@@ -129,7 +129,10 @@ def criar_banco() -> None:
                 entrada_manha TEXT,
                 saida_almoco TEXT,
                 volta_almoco TEXT,
-                saida_final TEXT
+                saida_final TEXT,
+                corrigido_manual BOOLEAN NOT NULL DEFAULT FALSE,
+                motivo_correcao TEXT,
+                corrigido_em TEXT
             )
         """)
         cursor.execute("""
@@ -146,6 +149,9 @@ def criar_banco() -> None:
         # Migração: adiciona colunas ausentes em bases antigas
         for coluna in ("entrada_manha", "saida_almoco", "volta_almoco", "saida_final"):
             cursor.execute(f"ALTER TABLE registros ADD COLUMN IF NOT EXISTS {coluna} TEXT")
+        cursor.execute("ALTER TABLE registros ADD COLUMN IF NOT EXISTS corrigido_manual BOOLEAN NOT NULL DEFAULT FALSE")
+        cursor.execute("ALTER TABLE registros ADD COLUMN IF NOT EXISTS motivo_correcao TEXT")
+        cursor.execute("ALTER TABLE registros ADD COLUMN IF NOT EXISTS corrigido_em TEXT")
 
         # Migração: adiciona colunas do perfil em bases antigas
         cursor.execute("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS nome_funcionario TEXT")
@@ -175,6 +181,9 @@ def criar_banco() -> None:
                 saida_almoco TEXT,
                 volta_almoco TEXT,
                 saida_final TEXT,
+                corrigido_manual INTEGER NOT NULL DEFAULT 0,
+                motivo_correcao TEXT,
+                corrigido_em TEXT,
                 FOREIGN KEY(user_id) REFERENCES usuarios(id)
             )
         """)
@@ -192,10 +201,18 @@ def criar_banco() -> None:
         # Migração: adiciona colunas ausentes em bases antigas (SQLite)
         cursor.execute("PRAGMA table_info(registros)")
         colunas_existentes = {row[1] for row in cursor.fetchall()}
-        for coluna in ("entrada_manha", "saida_almoco", "volta_almoco", "saida_final"):
+        for coluna, tipo in (
+            ("entrada_manha", "TEXT"),
+            ("saida_almoco", "TEXT"),
+            ("volta_almoco", "TEXT"),
+            ("saida_final", "TEXT"),
+            ("corrigido_manual", "INTEGER NOT NULL DEFAULT 0"),
+            ("motivo_correcao", "TEXT"),
+            ("corrigido_em", "TEXT"),
+        ):
             if coluna not in colunas_existentes:
                 try:
-                    cursor.execute(f"ALTER TABLE registros ADD COLUMN {coluna} TEXT")
+                    cursor.execute(f"ALTER TABLE registros ADD COLUMN {coluna} {tipo}")
                 except sqlite3.OperationalError as e:
                     # Se dois processos tentarem migrar ao mesmo tempo, o segundo pode
                     # receber "duplicate column name". Nesse caso, basta ignorar.
@@ -385,6 +402,48 @@ def admin_pode_promover_usuario(admin_id: int, usuario_id: int) -> bool:
         return False
     usuario = obter_usuario(usuario_id)
     return bool(usuario and usuario.get("role") == "user" and admin_pode_acessar_funcionario(admin_id, usuario_id))
+
+
+def obter_registro(registro_id: int) -> Optional[Dict[str, Any]]:
+    conn = conectar()
+    cursor = conn.cursor()
+    cursor.execute(
+        sql("""
+            SELECT id, user_id, data, entrada_manha, saida_almoco, volta_almoco, saida_final,
+                   corrigido_manual, motivo_correcao, corrigido_em
+            FROM registros
+            WHERE id=?
+        """),
+        (registro_id,),
+    )
+    row = cursor.fetchone()
+    conn.close()
+
+    if not row:
+        return None
+
+    return {
+        "id": row[0],
+        "user_id": row[1],
+        "data": row[2],
+        "entrada_manha": row[3],
+        "saida_almoco": row[4],
+        "volta_almoco": row[5],
+        "saida_final": row[6],
+        "corrigido_manual": bool(row[7]),
+        "motivo_correcao": row[8],
+        "corrigido_em": row[9],
+    }
+
+
+def usuario_pode_editar_registro_proprio(user_id: int, registro_id: int) -> bool:
+    registro = obter_registro(registro_id)
+    return bool(registro and registro["user_id"] == user_id)
+
+
+def admin_pode_editar_registro(admin_id: int, registro_id: int) -> bool:
+    registro = obter_registro(registro_id)
+    return bool(registro and admin_pode_acessar_funcionario(admin_id, int(registro["user_id"])))
 
 
 def primeiro_nome(nome: Optional[str]) -> Optional[str]:
@@ -743,6 +802,82 @@ def validar_periodo(data_inicio: Optional[str], data_fim: Optional[str]) -> Tupl
     return (inicio_dt.isoformat() if inicio_dt else None), (fim_dt.isoformat() if fim_dt else None), None
 
 
+def normalizar_hora_formulario(valor: Optional[str], nome_campo: str) -> Tuple[Optional[str], Optional[str]]:
+    texto = (valor or "").strip()
+    if not texto:
+        return None, None
+
+    for fmt in ("%H:%M", "%H:%M:%S"):
+        try:
+            hora = datetime.strptime(texto, fmt)
+            return hora.strftime("%H:%M"), None
+        except ValueError:
+            continue
+
+    return None, f"{nome_campo} inválido. Use o formato HH:MM."
+
+
+def dados_correcao_do_formulario() -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    data_texto = (request.form.get("data") or "").strip()
+    motivo = (request.form.get("motivo_correcao") or "").strip()
+
+    if not motivo:
+        return None, "Informe o motivo da correção."
+
+    try:
+        data = datetime.strptime(data_texto, "%Y-%m-%d").date().isoformat()
+    except ValueError:
+        return None, "Data inválida."
+
+    campos_hora = (
+        ("entrada_manha", "Entrada"),
+        ("saida_almoco", "Saída almoço"),
+        ("volta_almoco", "Volta almoço"),
+        ("saida_final", "Saída final"),
+    )
+    dados: Dict[str, Any] = {"data": data, "motivo_correcao": motivo}
+    for campo, rotulo in campos_hora:
+        hora, erro = normalizar_hora_formulario(request.form.get(campo), rotulo)
+        if erro:
+            return None, erro
+        dados[campo] = hora
+
+    return dados, None
+
+
+def atualizar_registro_manual(registro_id: int, dados: Dict[str, Any]) -> bool:
+    conn = conectar()
+    cursor = conn.cursor()
+    cursor.execute(
+        sql("""
+            UPDATE registros
+            SET data=?,
+                entrada_manha=?,
+                saida_almoco=?,
+                volta_almoco=?,
+                saida_final=?,
+                corrigido_manual=TRUE,
+                motivo_correcao=?,
+                corrigido_em=?
+            WHERE id=?
+        """),
+        (
+            dados["data"],
+            dados["entrada_manha"],
+            dados["saida_almoco"],
+            dados["volta_almoco"],
+            dados["saida_final"],
+            dados["motivo_correcao"],
+            agora().isoformat(timespec="seconds"),
+            registro_id,
+        ),
+    )
+    alterados = cursor.rowcount
+    conn.commit()
+    conn.close()
+    return bool(alterados)
+
+
 def aplicar_filtro_periodo_sql(sql_base: str, inicio: Optional[str], fim: Optional[str]) -> Tuple[str, Tuple[Any, ...]]:
     """
     Retorna (sql_filtrado, params_adicionais) para filtrar por data.
@@ -792,7 +927,8 @@ def buscar_registros_usuario(user_id: int, data_inicio: Optional[str] = None, da
     cursor = conn.cursor()
     sql_query, params_extra = aplicar_filtro_periodo_sql(
         """
-            SELECT id, user_id, data, entrada_manha, saida_almoco, volta_almoco, saida_final
+            SELECT id, user_id, data, entrada_manha, saida_almoco, volta_almoco, saida_final,
+                   corrigido_manual, motivo_correcao, corrigido_em
             FROM registros
             WHERE user_id=?
         """,
@@ -847,6 +983,9 @@ def montar_registros_para_tabela(registros_db: list[Tuple[Any, ...]], esperado_m
                 "total": total_linha,
                 "saldo": saldo_str,
                 "saldo_css": saldo_css,
+                "corrigido_manual": bool(registro[7]) if len(registro) > 7 else False,
+                "motivo_correcao": registro[8] if len(registro) > 8 else None,
+                "corrigido_em": registro[9] if len(registro) > 9 else None,
             }
         )
     return registros
@@ -1002,7 +1141,8 @@ def dashboard():
 
     sql_query, params_extra = aplicar_filtro_periodo_sql(
         """
-            SELECT id, user_id, data, entrada_manha, saida_almoco, volta_almoco, saida_final
+            SELECT id, user_id, data, entrada_manha, saida_almoco, volta_almoco, saida_final,
+                   corrigido_manual, motivo_correcao, corrigido_em
             FROM registros
             WHERE user_id=?
         """,
@@ -1030,7 +1170,8 @@ def dashboard():
     cursor_mes = conn_mes.cursor()
     cursor_mes.execute(
         sql("""
-            SELECT id, user_id, data, entrada_manha, saida_almoco, volta_almoco, saida_final
+            SELECT id, user_id, data, entrada_manha, saida_almoco, volta_almoco, saida_final,
+                   corrigido_manual, motivo_correcao, corrigido_em
             FROM registros
             WHERE user_id=? AND data BETWEEN ? AND ?
             ORDER BY data DESC, id DESC
@@ -1094,6 +1235,9 @@ def dashboard():
             "esperado": timedelta(minutes=int(esperado_min)) if esperado_min is not None else None,
             "saldo": saldo_str,
             "saldo_css": saldo_css,
+            "corrigido_manual": bool(registro[7]) if len(registro) > 7 else False,
+            "motivo_correcao": registro[8] if len(registro) > 8 else None,
+            "corrigido_em": registro[9] if len(registro) > 9 else None,
         })
 
     # Status do dia (hoje) — baseado no total do dia e se existe registro em aberto
@@ -1586,6 +1730,56 @@ def excluir_registro(registro_id: int):
     return redirect("/dashboard")
 
 
+@app.route("/registros/<int:registro_id>/editar", methods=["POST"])
+def editar_registro(registro_id: int):
+    if not usuario_logado():
+        return redirect("/")
+
+    user_id = session["user_id"]
+    if not usuario_pode_editar_registro_proprio(user_id, registro_id):
+        flash_erro("Registro nÃ£o encontrado.")
+        return redirect("/dashboard")
+
+    dados, erro = dados_correcao_do_formulario()
+    if erro:
+        flash_erro(erro)
+        return redirect("/dashboard")
+
+    if atualizar_registro_manual(registro_id, dados or {}):
+        flash_ok("Registro corrigido com sucesso.")
+    else:
+        flash_erro("Registro nÃ£o encontrado.")
+
+    return redirect("/dashboard")
+
+
+@app.route("/admin/registros/<int:registro_id>/editar", methods=["POST"])
+def admin_editar_registro(registro_id: int):
+    if not usuario_logado():
+        return redirect("/")
+
+    admin_id = session["user_id"]
+    registro = obter_registro(registro_id)
+    funcionario_id = int(registro["user_id"]) if registro else None
+    destino = f"/admin/funcionarios/{funcionario_id}" if funcionario_id else "/admin"
+
+    if not admin_pode_editar_registro(admin_id, registro_id):
+        flash_erro("Registro nÃ£o encontrado para esta empresa.")
+        return redirect("/admin" if usuario_eh_admin(admin_id) else "/dashboard")
+
+    dados, erro = dados_correcao_do_formulario()
+    if erro:
+        flash_erro(erro)
+        return redirect(destino)
+
+    if atualizar_registro_manual(registro_id, dados or {}):
+        flash_ok("Registro corrigido com sucesso.")
+    else:
+        flash_erro("Registro nÃ£o encontrado.")
+
+    return redirect(destino)
+
+
 @app.route("/perfil/excluir-conta", methods=["POST"])
 def excluir_conta():
     if not usuario_logado():
@@ -1666,7 +1860,8 @@ def api_listar_registros():
     cursor = conn.cursor()
     cursor.execute(
         sql("""
-            SELECT id, user_id, data, entrada_manha, saida_almoco, volta_almoco, saida_final
+            SELECT id, user_id, data, entrada_manha, saida_almoco, volta_almoco, saida_final,
+                   corrigido_manual, motivo_correcao, corrigido_em
             FROM registros
             WHERE user_id=?
             ORDER BY data DESC, id DESC
@@ -1695,6 +1890,9 @@ def api_listar_registros():
                 "total_seconds": int(total_linha.total_seconds()),
                 "saldo": saldo_str,
                 "em_aberto": em_aberto,
+                "corrigido_manual": bool(registro[7]) if len(registro) > 7 else False,
+                "motivo_correcao": registro[8] if len(registro) > 8 else None,
+                "corrigido_em": registro[9] if len(registro) > 9 else None,
             }
         )
 
@@ -1810,7 +2008,8 @@ def export_excel():
     cursor = conn.cursor()
     sql_query, params_extra = aplicar_filtro_periodo_sql(
         """
-            SELECT id, user_id, data, entrada_manha, saida_almoco, volta_almoco, saida_final
+            SELECT id, user_id, data, entrada_manha, saida_almoco, volta_almoco, saida_final,
+                   corrigido_manual, motivo_correcao, corrigido_em
             FROM registros
             WHERE user_id=?
         """,
@@ -1931,7 +2130,8 @@ def export_pdf():
     cursor = conn.cursor()
     sql_query, params_extra = aplicar_filtro_periodo_sql(
         """
-            SELECT id, user_id, data, entrada_manha, saida_almoco, volta_almoco, saida_final
+            SELECT id, user_id, data, entrada_manha, saida_almoco, volta_almoco, saida_final,
+                   corrigido_manual, motivo_correcao, corrigido_em
             FROM registros
             WHERE user_id=?
         """,

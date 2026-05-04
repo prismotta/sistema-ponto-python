@@ -76,6 +76,8 @@
                             <th>Saída Final</th>
                             <th>Total Trabalhado</th>
                             <th>Saldo do Dia</th>
+                            <th>Status</th>
+                            <th>Ações</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -88,15 +90,72 @@
                             <td>{{ r.saida_final if r.saida_final else "-" }}</td>
                             <td>{{ r.total }}</td>
                             <td class="{{ r.saldo_css }}">{{ r.saldo }}</td>
+                            <td class="text-center">
+                                {% if r.corrigido_manual %}
+                                    <span class="badge badge-warning" title="{{ r.motivo_correcao or 'Correção manual' }}">Corrigido</span>
+                                {% else %}
+                                    <span class="text-muted">-</span>
+                                {% endif %}
+                            </td>
+                            <td class="text-center">
+                                <button type="button" class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#editarRegistro{{ r.id }}">Editar</button>
+                            </td>
                         </tr>
                         {% else %}
                         <tr>
-                            <td colspan="7" class="text-center text-muted">Nenhum registro encontrado no período.</td>
+                            <td colspan="9" class="text-center text-muted">Nenhum registro encontrado no período.</td>
                         </tr>
                         {% endfor %}
                     </tbody>
                 </table>
             </div>
+
+            {% for r in registros %}
+            <div class="modal fade" id="editarRegistro{{ r.id }}" tabindex="-1" aria-labelledby="editarRegistroLabel{{ r.id }}" aria-hidden="true">
+                <div class="modal-dialog modal-lg modal-dialog-scrollable">
+                    <div class="modal-content">
+                        <form method="POST" action="/admin/registros/{{ r.id }}/editar">
+                            <div class="modal-header">
+                                <h2 class="modal-title fs-5" id="editarRegistroLabel{{ r.id }}">Editar registro</h2>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
+                            </div>
+                            <div class="modal-body">
+                                <div class="row g-3">
+                                    <div class="col-12 col-md-6">
+                                        <label class="form-label">Data</label>
+                                        <input type="date" name="data" class="form-control" value="{{ r.data }}" required>
+                                    </div>
+                                    <div class="col-6 col-md-3">
+                                        <label class="form-label">Entrada</label>
+                                        <input type="time" name="entrada_manha" class="form-control" value="{{ r.entrada[:5] if r.entrada else '' }}">
+                                    </div>
+                                    <div class="col-6 col-md-3">
+                                        <label class="form-label">Saída almoço</label>
+                                        <input type="time" name="saida_almoco" class="form-control" value="{{ r.saida_almoco[:5] if r.saida_almoco else '' }}">
+                                    </div>
+                                    <div class="col-6 col-md-3">
+                                        <label class="form-label">Volta almoço</label>
+                                        <input type="time" name="volta_almoco" class="form-control" value="{{ r.volta_almoco[:5] if r.volta_almoco else '' }}">
+                                    </div>
+                                    <div class="col-6 col-md-3">
+                                        <label class="form-label">Saída final</label>
+                                        <input type="time" name="saida_final" class="form-control" value="{{ r.saida_final[:5] if r.saida_final else '' }}">
+                                    </div>
+                                    <div class="col-12">
+                                        <label class="form-label">Motivo da correção</label>
+                                        <textarea name="motivo_correcao" class="form-control" rows="3" required placeholder="Esqueci de bater saída do almoço">{{ r.motivo_correcao or '' }}</textarea>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="modal-footer">
+                                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+                                <button type="submit" class="btn btn-primary">Salvar correção</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
         </div>
     </div>
 </div>

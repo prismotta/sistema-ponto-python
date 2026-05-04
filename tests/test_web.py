@@ -272,8 +272,40 @@ def _inserir_registro(user_id: int, data: str, entrada="08:00", saida_almoco="12
         """,
         (user_id, data, entrada, saida_almoco, volta_almoco, saida_final),
     )
+    registro_id = cursor.lastrowid
     conn.commit()
     conn.close()
+    return registro_id
+
+
+def _dados_correcao(**overrides):
+    dados = {
+        "data": "2026-04-10",
+        "entrada_manha": "08:00",
+        "saida_almoco": "12:00",
+        "volta_almoco": "13:00",
+        "saida_final": "18:00",
+        "motivo_correcao": "Esqueci de bater saída do almoço",
+    }
+    dados.update(overrides)
+    return dados
+
+
+def _buscar_registro_db(registro_id: int):
+    conn = sqlite3.connect("web/database.db")
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT id, user_id, data, entrada_manha, saida_almoco, volta_almoco, saida_final,
+               corrigido_manual, motivo_correcao, corrigido_em
+        FROM registros
+        WHERE id=?
+        """,
+        (registro_id,),
+    )
+    row = cursor.fetchone()
+    conn.close()
+    return row
 
 
 def _buscar_convite_por_email(email: str):
@@ -711,6 +743,124 @@ def test_admin_nao_promove_usuario_de_outra_empresa(client):
     role = cursor.fetchone()[0]
     conn.close()
     assert role == "user"
+
+
+def test_usuario_edita_proprio_registro_com_motivo_e_recalcula_saldo(client):
+    _criar_usuario_e_logar(client, "u1", "1234")
+    _definir_empresa(1, "Empresa A", "Usuario 1")
+    registro_id = _inserir_registro(1, "2026-04-10", saida_final="17:00")
+
+    response = client.post(
+        f"/registros/{registro_id}/editar",
+        data=_dados_correcao(saida_final="18:00"),
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert "Registro corrigido com sucesso.".encode("utf-8") in response.data
+    assert b"18:00" in response.data
+    assert b"+1h 00m" in response.data
+    assert b"Corrigido" in response.data
+    assert "Esqueci de bater saída do almoço".encode("utf-8") in response.data
+
+    registro = _buscar_registro_db(registro_id)
+    assert registro[6] == "18:00"
+    assert registro[7] == 1
+    assert registro[8] == "Esqueci de bater saída do almoço"
+    assert registro[9]
+
+
+def test_usuario_nao_edita_registro_de_outro_usuario(client):
+    _criar_usuario_e_logar(client, "u1", "1234")
+    _definir_empresa(1, "Empresa A", "Usuario 1")
+    registro_id = _inserir_registro(1, "2026-04-10", saida_final="17:00")
+
+    client.get("/logout")
+    _criar_usuario_e_logar(client, "u2", "1234")
+    _definir_empresa(2, "Empresa A", "Usuario 2")
+
+    response = client.post(
+        f"/registros/{registro_id}/editar",
+        data=_dados_correcao(saida_final="18:00"),
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/dashboard")
+    registro = _buscar_registro_db(registro_id)
+    assert registro[6] == "17:00"
+    assert registro[7] == 0
+
+
+def test_admin_edita_registro_da_mesma_empresa(client):
+    _criar_usuario_e_logar(client, "admin", "1234")
+    _definir_role(1, "admin")
+    _definir_empresa(1, "Empresa A", "Admin A")
+
+    client.get("/logout")
+    _criar_usuario_e_logar(client, "funcionario", "1234")
+    _definir_empresa(2, "Empresa A", "Funcionario A")
+    registro_id = _inserir_registro(2, "2026-04-10", saida_final="17:00")
+
+    client.get("/logout")
+    client.post("/", data={"username": "admin", "password": "1234"})
+    response = client.post(
+        f"/admin/registros/{registro_id}/editar",
+        data=_dados_correcao(saida_final="18:00", motivo_correcao="Ajuste feito pelo admin"),
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert "Registro corrigido com sucesso.".encode("utf-8") in response.data
+    assert b"18:00" in response.data
+    assert b"+1h 00m" in response.data
+    registro = _buscar_registro_db(registro_id)
+    assert registro[6] == "18:00"
+    assert registro[7] == 1
+    assert registro[8] == "Ajuste feito pelo admin"
+
+
+def test_admin_nao_edita_registro_de_outra_empresa(client):
+    _criar_usuario_e_logar(client, "admin", "1234")
+    _definir_role(1, "admin")
+    _definir_empresa(1, "Empresa A", "Admin A")
+
+    client.get("/logout")
+    _criar_usuario_e_logar(client, "funcionario", "1234")
+    _definir_empresa(2, "Empresa B", "Funcionario B")
+    registro_id = _inserir_registro(2, "2026-04-10", saida_final="17:00")
+
+    client.get("/logout")
+    client.post("/", data={"username": "admin", "password": "1234"})
+    response = client.post(
+        f"/admin/registros/{registro_id}/editar",
+        data=_dados_correcao(saida_final="18:00"),
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/admin")
+    registro = _buscar_registro_db(registro_id)
+    assert registro[6] == "17:00"
+    assert registro[7] == 0
+
+
+def test_motivo_correcao_e_obrigatorio(client):
+    _criar_usuario_e_logar(client, "u1", "1234")
+    _definir_empresa(1, "Empresa A", "Usuario 1")
+    registro_id = _inserir_registro(1, "2026-04-10", saida_final="17:00")
+
+    response = client.post(
+        f"/registros/{registro_id}/editar",
+        data=_dados_correcao(saida_final="18:00", motivo_correcao=""),
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert "Informe o motivo da correção.".encode("utf-8") in response.data
+    registro = _buscar_registro_db(registro_id)
+    assert registro[6] == "17:00"
+    assert registro[7] == 0
 
 
 def test_usuario_comum_nao_ve_botao_e_nao_promove(client):

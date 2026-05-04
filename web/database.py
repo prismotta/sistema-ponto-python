@@ -78,9 +78,15 @@ def criar_banco() -> None:
                 entrada_manha TEXT,
                 saida_almoco TEXT,
                 volta_almoco TEXT,
-                saida_final TEXT
+                saida_final TEXT,
+                corrigido_manual BOOLEAN NOT NULL DEFAULT FALSE,
+                motivo_correcao TEXT,
+                corrigido_em TEXT
             )
         """)
+        cursor.execute("ALTER TABLE registros ADD COLUMN IF NOT EXISTS corrigido_manual BOOLEAN NOT NULL DEFAULT FALSE")
+        cursor.execute("ALTER TABLE registros ADD COLUMN IF NOT EXISTS motivo_correcao TEXT")
+        cursor.execute("ALTER TABLE registros ADD COLUMN IF NOT EXISTS corrigido_em TEXT")
     else:
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS usuarios (
@@ -99,9 +105,21 @@ def criar_banco() -> None:
                 saida_almoco TEXT,
                 volta_almoco TEXT,
                 saida_final TEXT,
+                corrigido_manual INTEGER NOT NULL DEFAULT 0,
+                motivo_correcao TEXT,
+                corrigido_em TEXT,
                 FOREIGN KEY(user_id) REFERENCES usuarios(id)
             )
         """)
+        cursor.execute("PRAGMA table_info(registros)")
+        colunas_registros = {row[1] for row in cursor.fetchall()}
+        for coluna, tipo in (
+            ("corrigido_manual", "INTEGER NOT NULL DEFAULT 0"),
+            ("motivo_correcao", "TEXT"),
+            ("corrigido_em", "TEXT"),
+        ):
+            if coluna not in colunas_registros:
+                cursor.execute(f"ALTER TABLE registros ADD COLUMN {coluna} {tipo}")
 
     conn.commit()
     conn.close()

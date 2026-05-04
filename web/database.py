@@ -66,7 +66,13 @@ def criar_banco() -> None:
             CREATE TABLE IF NOT EXISTS usuarios (
                 id SERIAL PRIMARY KEY,
                 username TEXT UNIQUE NOT NULL,
-                password TEXT NOT NULL
+                password TEXT NOT NULL,
+                jornada_auto_ativa BOOLEAN NOT NULL DEFAULT FALSE,
+                auto_entrada TEXT,
+                auto_saida_almoco TEXT,
+                auto_volta_almoco TEXT,
+                auto_saida_final TEXT,
+                auto_dias_semana TEXT
             )
         """)
 
@@ -79,11 +85,19 @@ def criar_banco() -> None:
                 saida_almoco TEXT,
                 volta_almoco TEXT,
                 saida_final TEXT,
+                automatico BOOLEAN NOT NULL DEFAULT FALSE,
                 corrigido_manual BOOLEAN NOT NULL DEFAULT FALSE,
                 motivo_correcao TEXT,
                 corrigido_em TEXT
             )
         """)
+        cursor.execute("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS jornada_auto_ativa BOOLEAN NOT NULL DEFAULT FALSE")
+        cursor.execute("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS auto_entrada TEXT")
+        cursor.execute("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS auto_saida_almoco TEXT")
+        cursor.execute("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS auto_volta_almoco TEXT")
+        cursor.execute("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS auto_saida_final TEXT")
+        cursor.execute("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS auto_dias_semana TEXT")
+        cursor.execute("ALTER TABLE registros ADD COLUMN IF NOT EXISTS automatico BOOLEAN NOT NULL DEFAULT FALSE")
         cursor.execute("ALTER TABLE registros ADD COLUMN IF NOT EXISTS corrigido_manual BOOLEAN NOT NULL DEFAULT FALSE")
         cursor.execute("ALTER TABLE registros ADD COLUMN IF NOT EXISTS motivo_correcao TEXT")
         cursor.execute("ALTER TABLE registros ADD COLUMN IF NOT EXISTS corrigido_em TEXT")
@@ -92,7 +106,13 @@ def criar_banco() -> None:
             CREATE TABLE IF NOT EXISTS usuarios (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 username TEXT UNIQUE NOT NULL,
-                password TEXT NOT NULL
+                password TEXT NOT NULL,
+                jornada_auto_ativa INTEGER NOT NULL DEFAULT 0,
+                auto_entrada TEXT,
+                auto_saida_almoco TEXT,
+                auto_volta_almoco TEXT,
+                auto_saida_final TEXT,
+                auto_dias_semana TEXT
             )
         """)
 
@@ -105,6 +125,7 @@ def criar_banco() -> None:
                 saida_almoco TEXT,
                 volta_almoco TEXT,
                 saida_final TEXT,
+                automatico INTEGER NOT NULL DEFAULT 0,
                 corrigido_manual INTEGER NOT NULL DEFAULT 0,
                 motivo_correcao TEXT,
                 corrigido_em TEXT,
@@ -114,12 +135,25 @@ def criar_banco() -> None:
         cursor.execute("PRAGMA table_info(registros)")
         colunas_registros = {row[1] for row in cursor.fetchall()}
         for coluna, tipo in (
+            ("automatico", "INTEGER NOT NULL DEFAULT 0"),
             ("corrigido_manual", "INTEGER NOT NULL DEFAULT 0"),
             ("motivo_correcao", "TEXT"),
             ("corrigido_em", "TEXT"),
         ):
             if coluna not in colunas_registros:
                 cursor.execute(f"ALTER TABLE registros ADD COLUMN {coluna} {tipo}")
+        cursor.execute("PRAGMA table_info(usuarios)")
+        colunas_usuarios = {row[1] for row in cursor.fetchall()}
+        for coluna, tipo in (
+            ("jornada_auto_ativa", "INTEGER NOT NULL DEFAULT 0"),
+            ("auto_entrada", "TEXT"),
+            ("auto_saida_almoco", "TEXT"),
+            ("auto_volta_almoco", "TEXT"),
+            ("auto_saida_final", "TEXT"),
+            ("auto_dias_semana", "TEXT"),
+        ):
+            if coluna not in colunas_usuarios:
+                cursor.execute(f"ALTER TABLE usuarios ADD COLUMN {coluna} {tipo}")
 
     conn.commit()
     conn.close()

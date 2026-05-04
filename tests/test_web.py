@@ -224,7 +224,7 @@ def test_criar_banco_migra_registros_legado_sem_colunas_novas():
     colunas = {row[1] for row in cursor.fetchall()}
     conn.close()
 
-    assert {"entrada_manha", "saida_almoco", "volta_almoco", "saida_final"}.issubset(colunas)
+    assert {"entrada_manha", "saida_almoco", "volta_almoco", "saida_final", "automatico"}.issubset(colunas)
 
     with app.test_client() as client:
         client.post("/register", data={"username": "teste", "password": "1234"})
@@ -297,7 +297,7 @@ def _buscar_registro_db(registro_id: int):
     cursor.execute(
         """
         SELECT id, user_id, data, entrada_manha, saida_almoco, volta_almoco, saida_final,
-               corrigido_manual, motivo_correcao, corrigido_em
+               corrigido_manual, motivo_correcao, corrigido_em, automatico
         FROM registros
         WHERE id=?
         """,
@@ -861,6 +861,204 @@ def test_motivo_correcao_e_obrigatorio(client):
     registro = _buscar_registro_db(registro_id)
     assert registro[6] == "17:00"
     assert registro[7] == 0
+
+
+def test_salva_configuracao_jornada_automatica(client):
+    _criar_usuario_e_logar(client, "u1", "1234")
+
+    response = client.post(
+        "/perfil",
+        data={
+            "nome_funcionario": "Usuario 1",
+            "nome_empresa": "Empresa A",
+            "horas_diarias_esperadas": "8",
+            "jornada_auto_ativa": "on",
+            "auto_entrada": "08:00",
+            "auto_saida_almoco": "12:00",
+            "auto_volta_almoco": "13:00",
+            "auto_saida_final": "17:00",
+            "auto_dias_semana": ["0", "1", "2", "3", "4"],
+        },
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    conn = sqlite3.connect("web/database.db")
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT jornada_auto_ativa, auto_entrada, auto_saida_almoco, auto_volta_almoco,
+               auto_saida_final, auto_dias_semana
+        FROM usuarios
+        WHERE id=1
+        """
+    )
+    config = cursor.fetchone()
+    conn.close()
+    assert config == (1, "08:00", "12:00", "13:00", "17:00", "0,1,2,3,4")
+
+
+def test_gera_registro_automatico_no_dia_correto(client, monkeypatch):
+    monkeypatch.setattr("web.app.agora", lambda: datetime(2026, 5, 4, 9, 0))
+    _criar_usuario_e_logar(client, "u1", "1234")
+    client.post(
+        "/perfil",
+        data={
+            "nome_empresa": "Empresa A",
+            "horas_diarias_esperadas": "8",
+            "jornada_auto_ativa": "on",
+            "auto_entrada": "08:00",
+            "auto_saida_almoco": "12:00",
+            "auto_volta_almoco": "13:00",
+            "auto_saida_final": "17:00",
+            "auto_dias_semana": ["0"],
+        },
+        follow_redirects=True,
+    )
+
+    response = client.post("/jornada-automatica/gerar", follow_redirects=True)
+
+    assert response.status_code == 200
+    assert "Ponto automático gerado com sucesso.".encode("utf-8") in response.data
+    assert "Automático".encode("utf-8") in response.data
+    conn = sqlite3.connect("web/database.db")
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT data, entrada_manha, saida_almoco, volta_almoco, saida_final, automatico FROM registros WHERE user_id=1"
+    )
+    registro = cursor.fetchone()
+    conn.close()
+    assert registro == ("2026-05-04", "08:00", "12:00", "13:00", "17:00", 1)
+
+
+def test_nao_gera_jornada_automatica_fora_do_dia_configurado(client, monkeypatch):
+    monkeypatch.setattr("web.app.agora", lambda: datetime(2026, 5, 4, 9, 0))
+    _criar_usuario_e_logar(client, "u1", "1234")
+    client.post(
+        "/perfil",
+        data={
+            "nome_empresa": "Empresa A",
+            "horas_diarias_esperadas": "8",
+            "jornada_auto_ativa": "on",
+            "auto_entrada": "08:00",
+            "auto_saida_almoco": "12:00",
+            "auto_volta_almoco": "13:00",
+            "auto_saida_final": "17:00",
+            "auto_dias_semana": ["6"],
+        },
+        follow_redirects=True,
+    )
+
+    response = client.post("/jornada-automatica/gerar", follow_redirects=True)
+
+    assert response.status_code == 200
+    assert "Hoje não está configurado para jornada automática.".encode("utf-8") in response.data
+    conn = sqlite3.connect("web/database.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*) FROM registros WHERE user_id=1")
+    total = cursor.fetchone()[0]
+    conn.close()
+    assert total == 0
+
+
+def test_jornada_automatica_nao_duplica_registro(client, monkeypatch):
+    monkeypatch.setattr("web.app.agora", lambda: datetime(2026, 5, 4, 9, 0))
+    _criar_usuario_e_logar(client, "u1", "1234")
+    client.post(
+        "/perfil",
+        data={
+            "nome_empresa": "Empresa A",
+            "horas_diarias_esperadas": "8",
+            "jornada_auto_ativa": "on",
+            "auto_entrada": "08:00",
+            "auto_saida_almoco": "12:00",
+            "auto_volta_almoco": "13:00",
+            "auto_saida_final": "17:00",
+            "auto_dias_semana": ["0"],
+        },
+        follow_redirects=True,
+    )
+
+    client.post("/jornada-automatica/gerar", follow_redirects=True)
+    response = client.post("/jornada-automatica/gerar", follow_redirects=True)
+
+    assert "Já existe registro para hoje.".encode("utf-8") in response.data
+    conn = sqlite3.connect("web/database.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*) FROM registros WHERE user_id=1 AND data='2026-05-04'")
+    total = cursor.fetchone()[0]
+    conn.close()
+    assert total == 1
+
+
+def test_jornada_automatica_nao_sobrescreve_ponto_manual(client, monkeypatch):
+    monkeypatch.setattr("web.app.agora", lambda: datetime(2026, 5, 4, 9, 0))
+    _criar_usuario_e_logar(client, "u1", "1234")
+    _definir_empresa(1, "Empresa A", "Usuario 1")
+    _inserir_registro(1, "2026-05-04", entrada="09:00", saida_almoco=None, volta_almoco=None, saida_final=None)
+    client.post(
+        "/perfil",
+        data={
+            "horas_diarias_esperadas": "8",
+            "jornada_auto_ativa": "on",
+            "auto_entrada": "08:00",
+            "auto_saida_almoco": "12:00",
+            "auto_volta_almoco": "13:00",
+            "auto_saida_final": "17:00",
+            "auto_dias_semana": ["0"],
+        },
+        follow_redirects=True,
+    )
+
+    response = client.post("/jornada-automatica/gerar", follow_redirects=True)
+
+    assert "Já existe registro para hoje.".encode("utf-8") in response.data
+    conn = sqlite3.connect("web/database.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT entrada_manha, automatico, COUNT(*) OVER () FROM registros WHERE user_id=1 AND data='2026-05-04'")
+    registro = cursor.fetchone()
+    conn.close()
+    assert registro == ("09:00", 0, 1)
+
+
+def test_edicao_manual_de_registro_automatico_funciona(client, monkeypatch):
+    monkeypatch.setattr("web.app.agora", lambda: datetime(2026, 5, 4, 9, 0))
+    _criar_usuario_e_logar(client, "u1", "1234")
+    client.post(
+        "/perfil",
+        data={
+            "nome_empresa": "Empresa A",
+            "horas_diarias_esperadas": "8",
+            "jornada_auto_ativa": "on",
+            "auto_entrada": "08:00",
+            "auto_saida_almoco": "12:00",
+            "auto_volta_almoco": "13:00",
+            "auto_saida_final": "17:00",
+            "auto_dias_semana": ["0"],
+        },
+        follow_redirects=True,
+    )
+    client.post("/jornada-automatica/gerar", follow_redirects=True)
+    conn = sqlite3.connect("web/database.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT id FROM registros WHERE user_id=1 AND data='2026-05-04'")
+    registro_id = cursor.fetchone()[0]
+    conn.close()
+
+    response = client.post(
+        f"/registros/{registro_id}/editar",
+        data=_dados_correcao(data="2026-05-04", saida_final="18:00", motivo_correcao="Ajuste após jornada automática"),
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert b"+1h 00m" in response.data
+    assert "Automático".encode("utf-8") in response.data
+    assert b"Corrigido" in response.data
+    registro = _buscar_registro_db(registro_id)
+    assert registro[6] == "18:00"
+    assert registro[7] == 1
+    assert registro[10] == 1
 
 
 def test_usuario_comum_nao_ve_botao_e_nao_promove(client):

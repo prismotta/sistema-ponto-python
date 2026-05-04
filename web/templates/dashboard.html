@@ -73,6 +73,11 @@
             <span class="spinner-border spinner-border-sm d-none btn-ponto-principal-spinner" aria-hidden="true"></span>
             <span class="btn-ponto-principal-texto">{{ botao_ponto_texto }}</span>
         </a>
+        {% if jornada_auto_ativa %}
+        <form method="POST" action="/jornada-automatica/gerar" class="mt-2">
+            <button type="submit" class="btn btn-outline-primary">Gerar ponto automático de hoje</button>
+        </form>
+        {% endif %}
     </div>
 
     <div class="card card-soft">
@@ -205,9 +210,13 @@
                             <td>{{ r.total }}</td>
                             <td class="{{ r.saldo_css }}">{{ r.saldo }}</td>
                             <td class="text-center">
+                                {% if r.automatico %}
+                                    <span class="badge badge-neutral">Automático</span>
+                                {% endif %}
                                 {% if r.corrigido_manual %}
                                     <span class="badge badge-warning" title="{{ r.motivo_correcao or 'Correção manual' }}">Corrigido</span>
-                                {% else %}
+                                {% endif %}
+                                {% if not r.automatico and not r.corrigido_manual %}
                                     <span class="text-muted">-</span>
                                 {% endif %}
                             </td>

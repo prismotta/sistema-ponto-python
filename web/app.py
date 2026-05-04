@@ -60,6 +60,16 @@ IS_POSTGRES = bool(DATABASE_URL)
 _db_init_lock = threading.Lock()
 _db_init_done = False
 
+DIAS_SEMANA_AUTO = (
+    ("0", "segunda"),
+    ("1", "terça"),
+    ("2", "quarta"),
+    ("3", "quinta"),
+    ("4", "sexta"),
+    ("5", "sábado"),
+    ("6", "domingo"),
+)
+
 
 # ==========================================================
 # BANCO DE DADOS
@@ -118,7 +128,13 @@ def criar_banco() -> None:
                 nome_exibicao TEXT,
                 nome_empresa TEXT,
                 horas_diarias_esperadas_min INTEGER,
-                role TEXT NOT NULL DEFAULT 'user'
+                role TEXT NOT NULL DEFAULT 'user',
+                jornada_auto_ativa BOOLEAN NOT NULL DEFAULT FALSE,
+                auto_entrada TEXT,
+                auto_saida_almoco TEXT,
+                auto_volta_almoco TEXT,
+                auto_saida_final TEXT,
+                auto_dias_semana TEXT
             )
         """)
         cursor.execute("""
@@ -130,6 +146,7 @@ def criar_banco() -> None:
                 saida_almoco TEXT,
                 volta_almoco TEXT,
                 saida_final TEXT,
+                automatico BOOLEAN NOT NULL DEFAULT FALSE,
                 corrigido_manual BOOLEAN NOT NULL DEFAULT FALSE,
                 motivo_correcao TEXT,
                 corrigido_em TEXT
@@ -149,6 +166,7 @@ def criar_banco() -> None:
         # Migração: adiciona colunas ausentes em bases antigas
         for coluna in ("entrada_manha", "saida_almoco", "volta_almoco", "saida_final"):
             cursor.execute(f"ALTER TABLE registros ADD COLUMN IF NOT EXISTS {coluna} TEXT")
+        cursor.execute("ALTER TABLE registros ADD COLUMN IF NOT EXISTS automatico BOOLEAN NOT NULL DEFAULT FALSE")
         cursor.execute("ALTER TABLE registros ADD COLUMN IF NOT EXISTS corrigido_manual BOOLEAN NOT NULL DEFAULT FALSE")
         cursor.execute("ALTER TABLE registros ADD COLUMN IF NOT EXISTS motivo_correcao TEXT")
         cursor.execute("ALTER TABLE registros ADD COLUMN IF NOT EXISTS corrigido_em TEXT")
@@ -159,6 +177,12 @@ def criar_banco() -> None:
         cursor.execute("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS nome_empresa TEXT")
         cursor.execute("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS horas_diarias_esperadas_min INTEGER")
         cursor.execute("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'user'")
+        cursor.execute("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS jornada_auto_ativa BOOLEAN NOT NULL DEFAULT FALSE")
+        cursor.execute("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS auto_entrada TEXT")
+        cursor.execute("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS auto_saida_almoco TEXT")
+        cursor.execute("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS auto_volta_almoco TEXT")
+        cursor.execute("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS auto_saida_final TEXT")
+        cursor.execute("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS auto_dias_semana TEXT")
     else:
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS usuarios (
@@ -169,7 +193,13 @@ def criar_banco() -> None:
                 nome_exibicao TEXT,
                 nome_empresa TEXT,
                 horas_diarias_esperadas_min INTEGER,
-                role TEXT NOT NULL DEFAULT 'user'
+                role TEXT NOT NULL DEFAULT 'user',
+                jornada_auto_ativa INTEGER NOT NULL DEFAULT 0,
+                auto_entrada TEXT,
+                auto_saida_almoco TEXT,
+                auto_volta_almoco TEXT,
+                auto_saida_final TEXT,
+                auto_dias_semana TEXT
             )
         """)
         cursor.execute("""
@@ -181,6 +211,7 @@ def criar_banco() -> None:
                 saida_almoco TEXT,
                 volta_almoco TEXT,
                 saida_final TEXT,
+                automatico INTEGER NOT NULL DEFAULT 0,
                 corrigido_manual INTEGER NOT NULL DEFAULT 0,
                 motivo_correcao TEXT,
                 corrigido_em TEXT,
@@ -206,6 +237,7 @@ def criar_banco() -> None:
             ("saida_almoco", "TEXT"),
             ("volta_almoco", "TEXT"),
             ("saida_final", "TEXT"),
+            ("automatico", "INTEGER NOT NULL DEFAULT 0"),
             ("corrigido_manual", "INTEGER NOT NULL DEFAULT 0"),
             ("motivo_correcao", "TEXT"),
             ("corrigido_em", "TEXT"),
@@ -228,6 +260,12 @@ def criar_banco() -> None:
             ("nome_empresa", "TEXT"),
             ("horas_diarias_esperadas_min", "INTEGER"),
             ("role", "TEXT NOT NULL DEFAULT 'user'"),
+            ("jornada_auto_ativa", "INTEGER NOT NULL DEFAULT 0"),
+            ("auto_entrada", "TEXT"),
+            ("auto_saida_almoco", "TEXT"),
+            ("auto_volta_almoco", "TEXT"),
+            ("auto_saida_final", "TEXT"),
+            ("auto_dias_semana", "TEXT"),
         ):
             if coluna not in colunas_usuarios:
                 try:
@@ -322,7 +360,9 @@ def obter_perfil_usuario(user_id: int) -> Dict[str, Any]:
     cursor = conn.cursor()
     cursor.execute(
         sql("""
-            SELECT nome_funcionario, nome_exibicao, nome_empresa, horas_diarias_esperadas_min
+            SELECT nome_funcionario, nome_exibicao, nome_empresa, horas_diarias_esperadas_min,
+                   jornada_auto_ativa, auto_entrada, auto_saida_almoco, auto_volta_almoco,
+                   auto_saida_final, auto_dias_semana
             FROM usuarios
             WHERE id=?
         """),
@@ -332,9 +372,31 @@ def obter_perfil_usuario(user_id: int) -> Dict[str, Any]:
     conn.close()
 
     if not row:
-        return {"nome_funcionario": None, "nome_exibicao": None, "nome_empresa": None, "horas_diarias_esperadas_min": None}
+        return {
+            "nome_funcionario": None,
+            "nome_exibicao": None,
+            "nome_empresa": None,
+            "horas_diarias_esperadas_min": None,
+            "jornada_auto_ativa": False,
+            "auto_entrada": None,
+            "auto_saida_almoco": None,
+            "auto_volta_almoco": None,
+            "auto_saida_final": None,
+            "auto_dias_semana": "",
+        }
 
-    return {"nome_funcionario": row[0], "nome_exibicao": row[1], "nome_empresa": row[2], "horas_diarias_esperadas_min": row[3]}
+    return {
+        "nome_funcionario": row[0],
+        "nome_exibicao": row[1],
+        "nome_empresa": row[2],
+        "horas_diarias_esperadas_min": row[3],
+        "jornada_auto_ativa": bool(row[4]),
+        "auto_entrada": row[5],
+        "auto_saida_almoco": row[6],
+        "auto_volta_almoco": row[7],
+        "auto_saida_final": row[8],
+        "auto_dias_semana": row[9] or "",
+    }
 
 
 def obter_usuario(user_id: int) -> Optional[Dict[str, Any]]:
@@ -410,7 +472,7 @@ def obter_registro(registro_id: int) -> Optional[Dict[str, Any]]:
     cursor.execute(
         sql("""
             SELECT id, user_id, data, entrada_manha, saida_almoco, volta_almoco, saida_final,
-                   corrigido_manual, motivo_correcao, corrigido_em
+                   automatico, corrigido_manual, motivo_correcao, corrigido_em
             FROM registros
             WHERE id=?
         """),
@@ -430,9 +492,10 @@ def obter_registro(registro_id: int) -> Optional[Dict[str, Any]]:
         "saida_almoco": row[4],
         "volta_almoco": row[5],
         "saida_final": row[6],
-        "corrigido_manual": bool(row[7]),
-        "motivo_correcao": row[8],
-        "corrigido_em": row[9],
+        "automatico": bool(row[7]),
+        "corrigido_manual": bool(row[8]),
+        "motivo_correcao": row[9],
+        "corrigido_em": row[10],
     }
 
 
@@ -459,6 +522,12 @@ def perfil_para_json(perfil: Dict[str, Any]) -> Dict[str, Any]:
         "nome_exibicao": perfil.get("nome_exibicao"),
         "nome_empresa": perfil.get("nome_empresa"),
         "horas_diarias_esperadas_min": perfil.get("horas_diarias_esperadas_min"),
+        "jornada_auto_ativa": bool(perfil.get("jornada_auto_ativa")),
+        "auto_entrada": perfil.get("auto_entrada"),
+        "auto_saida_almoco": perfil.get("auto_saida_almoco"),
+        "auto_volta_almoco": perfil.get("auto_volta_almoco"),
+        "auto_saida_final": perfil.get("auto_saida_final"),
+        "auto_dias_semana": perfil.get("auto_dias_semana") or "",
     }
 
 
@@ -479,15 +548,40 @@ def atualizar_perfil_usuario(user_id: int, dados: Dict[str, Any]) -> Tuple[bool,
     if str(horas_texto).strip() and horas_min is None:
         return False, "Formato inválido em horas diárias esperadas. Use 8, 8.5 ou 08:00."
 
+    jornada_auto, erro_jornada = preparar_jornada_automatica(dados)
+    if erro_jornada:
+        return False, erro_jornada
+
     conn = conectar()
     cursor = conn.cursor()
     cursor.execute(
         sql("""
             UPDATE usuarios
-            SET nome_funcionario=?, nome_exibicao=?, nome_empresa=?, horas_diarias_esperadas_min=?
+            SET nome_funcionario=?,
+                nome_exibicao=?,
+                nome_empresa=?,
+                horas_diarias_esperadas_min=?,
+                jornada_auto_ativa=?,
+                auto_entrada=?,
+                auto_saida_almoco=?,
+                auto_volta_almoco=?,
+                auto_saida_final=?,
+                auto_dias_semana=?
             WHERE id=?
         """),
-        (nome_funcionario, nome_exibicao, nome_empresa, horas_min, user_id),
+        (
+            nome_funcionario,
+            nome_exibicao,
+            nome_empresa,
+            horas_min,
+            bool(jornada_auto and jornada_auto["jornada_auto_ativa"]),
+            jornada_auto["auto_entrada"] if jornada_auto else None,
+            jornada_auto["auto_saida_almoco"] if jornada_auto else None,
+            jornada_auto["auto_volta_almoco"] if jornada_auto else None,
+            jornada_auto["auto_saida_final"] if jornada_auto else None,
+            jornada_auto["auto_dias_semana"] if jornada_auto else "",
+            user_id,
+        ),
     )
     conn.commit()
     conn.close()
@@ -687,6 +781,57 @@ def registrar_ponto(user_id: int, quando: datetime) -> Dict[str, Any]:
     return {"acao": acao, "campo": campo, "data": hoje, "hora": hora_atual, "registro_id": registro_id}
 
 
+def existe_registro_usuario_data(user_id: int, data: str) -> bool:
+    conn = conectar()
+    cursor = conn.cursor()
+    cursor.execute(
+        sql("SELECT id FROM registros WHERE user_id=? AND data=? LIMIT 1"),
+        (user_id, data),
+    )
+    existe = cursor.fetchone() is not None
+    conn.close()
+    return existe
+
+
+def gerar_ponto_automatico_usuario(user_id: int, quando: datetime) -> Tuple[bool, str]:
+    perfil = obter_perfil_usuario(user_id)
+    if not perfil.get("jornada_auto_ativa"):
+        return False, "Jornada automática não está ativa."
+
+    hoje = quando.date().isoformat()
+    dia_semana = str(quando.weekday())
+    dias_configurados = dias_semana_validos(perfil.get("auto_dias_semana"))
+    if dia_semana not in dias_configurados:
+        return False, "Hoje não está configurado para jornada automática."
+
+    if existe_registro_usuario_data(user_id, hoje):
+        return False, "Já existe registro para hoje."
+
+    horarios = (
+        perfil.get("auto_entrada"),
+        perfil.get("auto_saida_almoco"),
+        perfil.get("auto_volta_almoco"),
+        perfil.get("auto_saida_final"),
+    )
+    if not all(horarios):
+        return False, "Configure todos os horários da jornada automática."
+
+    conn = conectar()
+    cursor = conn.cursor()
+    cursor.execute(
+        sql("""
+            INSERT INTO registros (
+                user_id, data, entrada_manha, saida_almoco, volta_almoco, saida_final, automatico
+            )
+            VALUES (?, ?, ?, ?, ?, ?, TRUE)
+        """),
+        (user_id, hoje, horarios[0], horarios[1], horarios[2], horarios[3]),
+    )
+    conn.commit()
+    conn.close()
+    return True, "Ponto automático gerado com sucesso."
+
+
 def parse_horas_esperadas_min(valor: Optional[str]) -> Optional[int]:
     """
     Aceita entrada do perfil como:
@@ -817,6 +962,46 @@ def normalizar_hora_formulario(valor: Optional[str], nome_campo: str) -> Tuple[O
     return None, f"{nome_campo} inválido. Use o formato HH:MM."
 
 
+def dias_semana_validos(valores: Any) -> list[str]:
+    if valores is None:
+        return []
+    if isinstance(valores, str):
+        itens = [v.strip() for v in valores.split(",")]
+    else:
+        itens = [str(v).strip() for v in valores]
+    selecionados = set(itens)
+    return [valor for valor, _ in DIAS_SEMANA_AUTO if valor in selecionados]
+
+
+def preparar_jornada_automatica(dados: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    ativa = bool(dados.get("jornada_auto_ativa"))
+    dias = dias_semana_validos(dados.get("auto_dias_semana"))
+    campos_hora = (
+        ("auto_entrada", "Entrada"),
+        ("auto_saida_almoco", "Saída almoço"),
+        ("auto_volta_almoco", "Volta almoço"),
+        ("auto_saida_final", "Saída final"),
+    )
+
+    config: Dict[str, Any] = {
+        "jornada_auto_ativa": ativa,
+        "auto_dias_semana": ",".join(dias),
+    }
+    for campo, rotulo in campos_hora:
+        hora, erro = normalizar_hora_formulario(dados.get(campo), rotulo)
+        if erro:
+            return None, erro
+        config[campo] = hora
+
+    if ativa:
+        if not all(config[campo] for campo, _ in campos_hora):
+            return None, "Preencha todos os horários da jornada automática."
+        if not dias:
+            return None, "Selecione ao menos um dia da semana para a jornada automática."
+
+    return config, None
+
+
 def dados_correcao_do_formulario() -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     data_texto = (request.form.get("data") or "").strip()
     motivo = (request.form.get("motivo_correcao") or "").strip()
@@ -928,7 +1113,7 @@ def buscar_registros_usuario(user_id: int, data_inicio: Optional[str] = None, da
     sql_query, params_extra = aplicar_filtro_periodo_sql(
         """
             SELECT id, user_id, data, entrada_manha, saida_almoco, volta_almoco, saida_final,
-                   corrigido_manual, motivo_correcao, corrigido_em
+                   automatico, corrigido_manual, motivo_correcao, corrigido_em
             FROM registros
             WHERE user_id=?
         """,
@@ -983,9 +1168,10 @@ def montar_registros_para_tabela(registros_db: list[Tuple[Any, ...]], esperado_m
                 "total": total_linha,
                 "saldo": saldo_str,
                 "saldo_css": saldo_css,
-                "corrigido_manual": bool(registro[7]) if len(registro) > 7 else False,
-                "motivo_correcao": registro[8] if len(registro) > 8 else None,
-                "corrigido_em": registro[9] if len(registro) > 9 else None,
+                "automatico": bool(registro[7]) if len(registro) > 7 else False,
+                "corrigido_manual": bool(registro[8]) if len(registro) > 8 else False,
+                "motivo_correcao": registro[9] if len(registro) > 9 else None,
+                "corrigido_em": registro[10] if len(registro) > 10 else None,
             }
         )
     return registros
@@ -1142,7 +1328,7 @@ def dashboard():
     sql_query, params_extra = aplicar_filtro_periodo_sql(
         """
             SELECT id, user_id, data, entrada_manha, saida_almoco, volta_almoco, saida_final,
-                   corrigido_manual, motivo_correcao, corrigido_em
+                   automatico, corrigido_manual, motivo_correcao, corrigido_em
             FROM registros
             WHERE user_id=?
         """,
@@ -1171,7 +1357,7 @@ def dashboard():
     cursor_mes.execute(
         sql("""
             SELECT id, user_id, data, entrada_manha, saida_almoco, volta_almoco, saida_final,
-                   corrigido_manual, motivo_correcao, corrigido_em
+                   automatico, corrigido_manual, motivo_correcao, corrigido_em
             FROM registros
             WHERE user_id=? AND data BETWEEN ? AND ?
             ORDER BY data DESC, id DESC
@@ -1235,9 +1421,10 @@ def dashboard():
             "esperado": timedelta(minutes=int(esperado_min)) if esperado_min is not None else None,
             "saldo": saldo_str,
             "saldo_css": saldo_css,
-            "corrigido_manual": bool(registro[7]) if len(registro) > 7 else False,
-            "motivo_correcao": registro[8] if len(registro) > 8 else None,
-            "corrigido_em": registro[9] if len(registro) > 9 else None,
+            "automatico": bool(registro[7]) if len(registro) > 7 else False,
+            "corrigido_manual": bool(registro[8]) if len(registro) > 8 else False,
+            "motivo_correcao": registro[9] if len(registro) > 9 else None,
+            "corrigido_em": registro[10] if len(registro) > 10 else None,
         })
 
     # Status do dia (hoje) — baseado no total do dia e se existe registro em aberto
@@ -1306,6 +1493,7 @@ def dashboard():
         total_hoje_status=total_hoje_str,
         saldo_hoje_status=saldo_hoje_str,
         botao_ponto_texto=botao_ponto_texto,
+        jornada_auto_ativa=bool(perfil.get("jornada_auto_ativa")),
     )
 
 
@@ -1648,6 +1836,12 @@ def perfil():
             "nome_funcionario": request.form.get("nome_funcionario"),
             "nome_exibicao": request.form.get("nome_exibicao"),
             "horas_diarias_esperadas": request.form.get("horas_diarias_esperadas"),
+            "jornada_auto_ativa": request.form.get("jornada_auto_ativa") == "on",
+            "auto_entrada": request.form.get("auto_entrada"),
+            "auto_saida_almoco": request.form.get("auto_saida_almoco"),
+            "auto_volta_almoco": request.form.get("auto_volta_almoco"),
+            "auto_saida_final": request.form.get("auto_saida_final"),
+            "auto_dias_semana": request.form.getlist("auto_dias_semana"),
         }
         if "nome_empresa" in request.form:
             dados_perfil["nome_empresa"] = request.form.get("nome_empresa")
@@ -1673,6 +1867,8 @@ def perfil():
         "perfil.html",
         perfil=perfil_atual,
         horas_diarias_esperadas=horas_str,
+        dias_semana_auto=DIAS_SEMANA_AUTO,
+        auto_dias_selecionados=dias_semana_validos(perfil_atual.get("auto_dias_semana")),
     )
 
 
@@ -1816,6 +2012,19 @@ def bater():
     return redirect("/dashboard")
 
 
+@app.route("/jornada-automatica/gerar", methods=["POST"])
+def gerar_jornada_automatica():
+    if not usuario_logado():
+        return redirect("/")
+
+    ok, mensagem = gerar_ponto_automatico_usuario(session["user_id"], agora())
+    if ok:
+        flash_ok(mensagem)
+    else:
+        flash_aviso(mensagem)
+    return redirect("/dashboard")
+
+
 # ==========================================================
 # API REST (JSON)
 # ==========================================================
@@ -1861,7 +2070,7 @@ def api_listar_registros():
     cursor.execute(
         sql("""
             SELECT id, user_id, data, entrada_manha, saida_almoco, volta_almoco, saida_final,
-                   corrigido_manual, motivo_correcao, corrigido_em
+                   automatico, corrigido_manual, motivo_correcao, corrigido_em
             FROM registros
             WHERE user_id=?
             ORDER BY data DESC, id DESC
@@ -1890,9 +2099,10 @@ def api_listar_registros():
                 "total_seconds": int(total_linha.total_seconds()),
                 "saldo": saldo_str,
                 "em_aberto": em_aberto,
-                "corrigido_manual": bool(registro[7]) if len(registro) > 7 else False,
-                "motivo_correcao": registro[8] if len(registro) > 8 else None,
-                "corrigido_em": registro[9] if len(registro) > 9 else None,
+                "automatico": bool(registro[7]) if len(registro) > 7 else False,
+                "corrigido_manual": bool(registro[8]) if len(registro) > 8 else False,
+                "motivo_correcao": registro[9] if len(registro) > 9 else None,
+                "corrigido_em": registro[10] if len(registro) > 10 else None,
             }
         )
 
@@ -2009,7 +2219,7 @@ def export_excel():
     sql_query, params_extra = aplicar_filtro_periodo_sql(
         """
             SELECT id, user_id, data, entrada_manha, saida_almoco, volta_almoco, saida_final,
-                   corrigido_manual, motivo_correcao, corrigido_em
+                   automatico, corrigido_manual, motivo_correcao, corrigido_em
             FROM registros
             WHERE user_id=?
         """,
@@ -2131,7 +2341,7 @@ def export_pdf():
     sql_query, params_extra = aplicar_filtro_periodo_sql(
         """
             SELECT id, user_id, data, entrada_manha, saida_almoco, volta_almoco, saida_final,
-                   corrigido_manual, motivo_correcao, corrigido_em
+                   automatico, corrigido_manual, motivo_correcao, corrigido_em
             FROM registros
             WHERE user_id=?
         """,

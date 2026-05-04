@@ -70,6 +70,47 @@
                     <div class="form-text">Use 8, 8.5 ou 08:00.</div>
                 </div>
 
+                <hr>
+                <h5 class="card-title">Jornada automática</h5>
+
+                <div class="form-check form-switch mb-3">
+                    <input class="form-check-input" type="checkbox" role="switch" id="jornadaAutoAtiva" name="jornada_auto_ativa" {% if perfil.jornada_auto_ativa %}checked{% endif %}>
+                    <label class="form-check-label" for="jornadaAutoAtiva">Ativar jornada automática</label>
+                </div>
+
+                <div class="row g-3 mb-3">
+                    <div class="col-6 col-md-3">
+                        <label class="form-label">Hora de entrada</label>
+                        <input type="time" name="auto_entrada" class="form-control" value="{{ perfil.auto_entrada or '' }}">
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <label class="form-label">Saída almoço</label>
+                        <input type="time" name="auto_saida_almoco" class="form-control" value="{{ perfil.auto_saida_almoco or '' }}">
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <label class="form-label">Volta almoço</label>
+                        <input type="time" name="auto_volta_almoco" class="form-control" value="{{ perfil.auto_volta_almoco or '' }}">
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <label class="form-label">Saída final</label>
+                        <input type="time" name="auto_saida_final" class="form-control" value="{{ perfil.auto_saida_final or '' }}">
+                    </div>
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label">Dias da semana aplicáveis</label>
+                    <div class="row g-2">
+                        {% for valor, nome in dias_semana_auto %}
+                        <div class="col-6 col-md-3">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="auto_dias_semana" id="autoDia{{ valor }}" value="{{ valor }}" {% if valor in auto_dias_selecionados %}checked{% endif %}>
+                                <label class="form-check-label" for="autoDia{{ valor }}">{{ nome }}</label>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+
                 <button type="submit" class="btn btn-primary">Salvar</button>
             </form>
         </div>

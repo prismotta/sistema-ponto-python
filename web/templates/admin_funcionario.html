@@ -91,9 +91,13 @@
                             <td>{{ r.total }}</td>
                             <td class="{{ r.saldo_css }}">{{ r.saldo }}</td>
                             <td class="text-center">
+                                {% if r.automatico %}
+                                    <span class="badge badge-neutral">Automático</span>
+                                {% endif %}
                                 {% if r.corrigido_manual %}
                                     <span class="badge badge-warning" title="{{ r.motivo_correcao or 'Correção manual' }}">Corrigido</span>
-                                {% else %}
+                                {% endif %}
+                                {% if not r.automatico and not r.corrigido_manual %}
                                     <span class="text-muted">-</span>
                                 {% endif %}
                             </td>
